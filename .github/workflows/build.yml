@@ -1,0 +1,74 @@
+name: Build and Release
+
+on:
+  push:
+    branches: ["master"]
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: ["master"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Rustfmt
+        run: cargo fmt -- --check
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+      - name: Run tests
+        run: cargo test --verbose
+
+  build:
+    name: Build Release
+    needs: check
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: agent-tui-linux-amd64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: agent-tui-darwin-arm64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: agent-tui-darwin-amd64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: target/${{ matrix.target }}/release/agent-tui
+
+  release:
+    name: Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download all artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: artifacts/**/*
