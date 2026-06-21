@@ -7,7 +7,7 @@ use crossterm::{
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, BorderType, Gauge, List, ListItem, Paragraph},
@@ -60,16 +60,14 @@ impl AppState {
 
     fn update_from_nats(&mut self, subject: &str, payload: &str) {
         if subject.starts_with("events.heart") {
-            if let Some(cpu_str) = payload.split("CPU: ").nth(1).and_then(|s| s.split('%').next()) {
-                if let Ok(c) = cpu_str.trim().parse::<u16>() {
+            if let Some(cpu_str) = payload.split("CPU: ").nth(1).and_then(|s| s.split('%').next())
+                && let Ok(c) = cpu_str.trim().parse::<u16>() {
                     self.cpu = c.min(100);
                 }
-            }
-            if let Some(mem_str) = payload.split("MEM: ").nth(1).and_then(|s| s.split("MB").next()) {
-                if let Ok(m) = mem_str.trim().parse::<u16>() {
+            if let Some(mem_str) = payload.split("MEM: ").nth(1).and_then(|s| s.split("MB").next())
+                && let Ok(m) = mem_str.trim().parse::<u16>() {
                     self.mem = m;
                 }
-            }
         } else if subject.starts_with("events.spine") {
             self.workflows.insert(0, format!("▶ {}", payload));
             self.workflows.truncate(20);
@@ -77,7 +75,7 @@ impl AppState {
             self.context.insert(0, format!("■ {}", payload));
             self.context.truncate(10);
         } else if subject.starts_with("events.muscle") {
-            self.push_log(format!("{}", payload));
+            self.push_log(payload.to_string());
         } else {
             self.push_log(format!("{} -> {}", subject, payload));
         }
@@ -101,15 +99,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tx_in = tx.clone();
     tokio::spawn(async move {
         loop {
-            if event::poll(Duration::from_millis(50)).unwrap() {
-                if let CEvent::Key(key) = event::read().unwrap() {
-                    if key.kind == KeyEventKind::Press {
-                        if tx_in.send(AppEvent::Input(key.code)).await.is_err() {
+            if event::poll(Duration::from_millis(50)).unwrap()
+                && let CEvent::Key(key) = event::read().unwrap()
+                    && key.kind == KeyEventKind::Press
+                        && tx_in.send(AppEvent::Input(key.code)).await.is_err() {
                             break;
                         }
-                    }
-                }
-            }
             if tx_in.send(AppEvent::Tick).await.is_err() {
                 break;
             }
