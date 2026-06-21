@@ -173,15 +173,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn ui(f: &mut ratatui::Frame, app: &AppState) {
     let size = f.area();
 
-    // Main chunks: Title (1), Health (3), Middle (10+), Bottom (7)
+    // Main split: Title vs Body
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),    // Title
-            Constraint::Length(3),    // Health
-            Constraint::Min(10),      // Workflows + Logs
-            Constraint::Length(7),    // Context
-        ])
+        .constraints([Constraint::Length(1), Constraint::Min(10)])
         .split(size);
 
     // Title
@@ -191,37 +186,41 @@ fn ui(f: &mut ratatui::Frame, app: &AppState) {
     ]));
     f.render_widget(title, main_chunks[0]);
 
-    // Health Layout
-    let health_chunks = Layout::default()
+    // Body split: Left Sidebar vs Right Main Area
+    let body_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
         .split(main_chunks[1]);
 
-    // CPU Gauge
+    // --- LEFT SIDEBAR ---
+    let left_sidebar = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(6), Constraint::Min(10)])
+        .split(body_chunks[0]);
+
+    // 1. Health Gauges (Stacked vertically)
+    let health_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(left_sidebar[0]);
+
     let cpu_color = if app.cpu > 80 { CYBER_RED } else { CYBER_BLUE };
     let cpu_gauge = Gauge::default()
-        .block(Block::default().title(" System CPU ").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(cpu_color)))
+        .block(Block::default().title(" CPU ").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(cpu_color)))
         .gauge_style(Style::default().fg(cpu_color).bg(Color::DarkGray))
         .percent(app.cpu)
         .label(format!("{}%", app.cpu));
     f.render_widget(cpu_gauge, health_chunks[0]);
 
-    // Mem Gauge (calc percent based on 16GB max for demo)
     let mem_percent = ((app.mem as f32 / 16000.0) * 100.0).min(100.0) as u16;
     let mem_gauge = Gauge::default()
-        .block(Block::default().title(" System Memory ").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(CYBER_PURPLE)))
+        .block(Block::default().title(" MEM ").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(CYBER_PURPLE)))
         .gauge_style(Style::default().fg(CYBER_PURPLE).bg(Color::DarkGray))
         .percent(mem_percent)
         .label(format!("{}MB", app.mem));
     f.render_widget(mem_gauge, health_chunks[1]);
 
-    // Middle chunks: Left (Workflows), Right (Logs)
-    let middle_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
-        .split(main_chunks[2]);
-
-    // Workflows Panel
+    // 2. DAG Workflows
     let wf_items: Vec<ListItem> = app.workflows
         .iter()
         .enumerate()
@@ -232,19 +231,15 @@ fn ui(f: &mut ratatui::Frame, app: &AppState) {
         .collect();
     let wf_list = List::new(wf_items)
         .block(Block::default().title(" DAG Workflows ").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(CYBER_GREEN)));
-    f.render_widget(wf_list, middle_chunks[0]);
+    f.render_widget(wf_list, left_sidebar[1]);
 
-    // Logs Panel
-    let log_items: Vec<ListItem> = app.logs
-        .iter()
-        .map(|l| ListItem::new(l.as_str()))
-        .collect();
-    let log_list = List::new(log_items)
-        .block(Block::default().title(" Sandbox Logs ").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(CYBER_BLUE)))
-        .style(Style::default().fg(Color::Rgb(163, 190, 140))); // Fira Code aesthetic
-    f.render_widget(log_list, middle_chunks[1]);
+    // --- RIGHT MAIN AREA ---
+    let right_main = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(7), Constraint::Min(10)])
+        .split(body_chunks[1]);
 
-    // Context Panel
+    // 3. Brain Context
     let ctx_items: Vec<ListItem> = app.context
         .iter()
         .map(|c| ListItem::new(c.as_str()))
@@ -252,5 +247,15 @@ fn ui(f: &mut ratatui::Frame, app: &AppState) {
     let ctx_list = List::new(ctx_items)
         .block(Block::default().title(" Brain Context Retrieval ").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(CYBER_PURPLE)))
         .style(Style::default().fg(Color::Rgb(224, 179, 255)));
-    f.render_widget(ctx_list, main_chunks[3]);
+    f.render_widget(ctx_list, right_main[0]);
+
+    // 4. Sandbox Logs
+    let log_items: Vec<ListItem> = app.logs
+        .iter()
+        .map(|l| ListItem::new(l.as_str()))
+        .collect();
+    let log_list = List::new(log_items)
+        .block(Block::default().title(" Sandbox Logs ").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(CYBER_BLUE)))
+        .style(Style::default().fg(Color::Rgb(163, 190, 140))); // Fira Code aesthetic
+    f.render_widget(log_list, right_main[1]);
 }
