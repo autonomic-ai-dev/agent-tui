@@ -1,0 +1,64 @@
+name: Stage test
+
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: Test and snapshot build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2.9.1
+
+      - name: Resolve package metadata
+        id: meta
+        run: |
+          version=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "git_sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Format check
+        run: cargo fmt -- --check
+
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+
+      - name: Run tests
+        run: cargo test --release
+
+      - name: Snapshot build
+        run: cargo build --release
+
+      - name: Stage snapshot binary
+        run: |
+          mkdir -p dist
+          cp target/release/agent-tui \
+            "dist/agent-tui-snapshot-linux-x86_64-${{ steps.meta.outputs.version }}-${{ steps.meta.outputs.git_sha }}"
+          chmod +x "dist/agent-tui-snapshot-linux-x86_64-${{ steps.meta.outputs.version }}-${{ steps.meta.outputs.git_sha }}"
+
+      - name: Upload snapshot artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: agent-tui-snapshot-linux-x86_64
+          path: dist/agent-tui-snapshot-linux-x86_64-${{ steps.meta.outputs.version }}-${{ steps.meta.outputs.git_sha }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: aeswibon/pipeline-compose-export@v1.1.0
+        if: success()
+        with:
+          stage_id: test
+          outputs: >-
+            {"version":"${{ steps.meta.outputs.version }}",
+             "git_sha":"${{ steps.meta.outputs.git_sha }}",
+             "snapshot_run_id":"${{ github.run_id }}"}
