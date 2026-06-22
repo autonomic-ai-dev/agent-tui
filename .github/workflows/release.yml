@@ -4,9 +4,6 @@ on:
   push:
     tags: ["v*"]
 
-concurrency:
-  group: ${{ github.repository }}-pipeline
-  cancel-in-progress: ${{ github.workflow != 'Release' }}
 permissions:
   contents: write
   actions: write

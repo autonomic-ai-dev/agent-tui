@@ -7,9 +7,6 @@ on:
     branches: [master]
   workflow_dispatch:
 
-concurrency:
-  group: ${{ github.repository }}-pipeline
-  cancel-in-progress: ${{ github.workflow != 'Release' }}
 permissions:
   actions: write
 
