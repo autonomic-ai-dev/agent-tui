@@ -1,5 +1,7 @@
 # Autonomic AI Terminal Dashboard (`agent-tui`)
 
+Agent context: [docs/CONTEXT.md](docs/CONTEXT.md).
+
 A blazingly fast, multi-threaded Rust terminal user interface (TUI) for the Autonomic AI ecosystem. It connects directly to the local NATS event bus to give developers unprecedented visibility into agent execution without leaving the terminal.
 
 ## Features
