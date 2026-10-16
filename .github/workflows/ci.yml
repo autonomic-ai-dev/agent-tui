@@ -28,7 +28,7 @@ permissions:
 jobs:
   run-pipeline:
     name: Run CI pipeline
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:

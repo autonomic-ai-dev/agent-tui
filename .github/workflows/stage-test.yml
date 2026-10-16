@@ -10,7 +10,7 @@ env:
 jobs:
   test:
     name: Test and snapshot build
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
@@ -43,14 +43,14 @@ jobs:
         run: |
           mkdir -p dist
           cp target/release/agent-tui \
-            "dist/agent-tui-snapshot-darwin-arm64-${{ steps.meta.outputs.version }}-${{ steps.meta.outputs.git_sha }}"
-          chmod +x "dist/agent-tui-snapshot-darwin-arm64-${{ steps.meta.outputs.version }}-${{ steps.meta.outputs.git_sha }}"
+            "dist/agent-tui-snapshot-linux-x86_64-${{ steps.meta.outputs.version }}-${{ steps.meta.outputs.git_sha }}"
+          chmod +x "dist/agent-tui-snapshot-linux-x86_64-${{ steps.meta.outputs.version }}-${{ steps.meta.outputs.git_sha }}"
 
       - name: Upload snapshot artifact
         uses: actions/upload-artifact@v7
         with:
-          name: agent-tui-snapshot-darwin-arm64
-          path: dist/agent-tui-snapshot-darwin-arm64-${{ steps.meta.outputs.version }}-${{ steps.meta.outputs.git_sha }}
+          name: agent-tui-snapshot-linux-x86_64
+          path: dist/agent-tui-snapshot-linux-x86_64-${{ steps.meta.outputs.version }}-${{ steps.meta.outputs.git_sha }}
           if-no-files-found: error
           retention-days: 14
 
