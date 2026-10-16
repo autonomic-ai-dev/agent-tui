@@ -321,7 +321,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let _ = tx_nats
                     .send(AppEvent::NatsMsg {
                         subject: "system.warn".into(),
-                        payload: format!("NATS unavailable ({e}) — operating in local telemetry cache"),
+                        payload: format!(
+                            "NATS unavailable ({e}) — operating in local telemetry cache"
+                        ),
                     })
                     .await;
             }
@@ -405,7 +407,13 @@ fn render_header(f: &mut ratatui::Frame, area: Rect, app: &AppState) {
         .split(area);
 
     let logo = Paragraph::new(Line::from(vec![
-        Span::styled("⚡ AUTONOMIC TUI ", Style::default().fg(Color::Black).bg(CYBER_BLUE).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "⚡ AUTONOMIC TUI ",
+            Style::default()
+                .fg(Color::Black)
+                .bg(CYBER_BLUE)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" v1.0.0-beta.1", Style::default().fg(CYBER_BLUE)),
     ]));
     f.render_widget(logo, chunks[0]);
@@ -417,18 +425,30 @@ fn render_header(f: &mut ratatui::Frame, area: Rect, app: &AppState) {
     };
     let center = Paragraph::new(Line::from(vec![
         Span::styled("MESH: ", Style::default().fg(TEXT_MUTED)),
-        Span::styled("11/11 OPERATIONAL ", Style::default().fg(CYBER_GREEN).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "11/11 OPERATIONAL ",
+            Style::default()
+                .fg(CYBER_GREEN)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled("• ", Style::default().fg(TEXT_MUTED)),
         Span::styled(nats_status, Style::default().fg(nats_color)),
-    ])).alignment(Alignment::Center);
+    ]))
+    .alignment(Alignment::Center);
     f.render_widget(center, chunks[1]);
 
     let right = Paragraph::new(Line::from(vec![
         Span::styled("ARCH: ", Style::default().fg(TEXT_MUTED)),
         Span::styled("arm64-darwin ", Style::default().fg(CYBER_BLUE)),
         Span::styled("EVENTS: ", Style::default().fg(TEXT_MUTED)),
-        Span::styled(format!("{}", app.event_count), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-    ])).alignment(Alignment::Right);
+        Span::styled(
+            format!("{}", app.event_count),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]))
+    .alignment(Alignment::Right);
     f.render_widget(right, chunks[2]);
 }
 
@@ -481,7 +501,13 @@ fn render_overview_tab(f: &mut ratatui::Frame, area: Rect, app: &AppState) {
     // Gauges
     let cpu_color = if app.cpu > 80 { CYBER_RED } else { CYBER_BLUE };
     let cpu_gauge = Gauge::default()
-        .block(Block::default().title(" CPU Load ").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(cpu_color)))
+        .block(
+            Block::default()
+                .title(" CPU Load ")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(cpu_color)),
+        )
         .gauge_style(Style::default().fg(cpu_color).bg(Color::Rgb(30, 35, 45)))
         .percent(app.cpu)
         .label(format!("{}%", app.cpu));
@@ -489,15 +515,31 @@ fn render_overview_tab(f: &mut ratatui::Frame, area: Rect, app: &AppState) {
 
     let mem_percent = ((app.mem as f32 / 16000.0) * 100.0).min(100.0) as u16;
     let mem_gauge = Gauge::default()
-        .block(Block::default().title(" Memory (MB) ").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(CYBER_PURPLE)))
+        .block(
+            Block::default()
+                .title(" Memory (MB) ")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(CYBER_PURPLE)),
+        )
         .gauge_style(Style::default().fg(CYBER_PURPLE).bg(Color::Rgb(30, 35, 45)))
         .percent(mem_percent)
         .label(format!("{} MB / 16 GB", app.mem));
     f.render_widget(mem_gauge, left[1]);
 
-    let budget_color = if app.token_budget_used > 85 { CYBER_RED } else { CYBER_GREEN };
+    let budget_color = if app.token_budget_used > 85 {
+        CYBER_RED
+    } else {
+        CYBER_GREEN
+    };
     let budget_gauge = Gauge::default()
-        .block(Block::default().title(" Token Cost Guardrail (Heart) ").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(budget_color)))
+        .block(
+            Block::default()
+                .title(" Token Cost Guardrail (Heart) ")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(budget_color)),
+        )
         .gauge_style(Style::default().fg(budget_color).bg(Color::Rgb(30, 35, 45)))
         .percent(app.token_budget_used)
         .label(format!("{}% Budget Consumed", app.token_budget_used));
@@ -507,7 +549,12 @@ fn render_overview_tab(f: &mut ratatui::Frame, area: Rect, app: &AppState) {
     let mesh_summary = Paragraph::new(vec![
         Line::from(vec![
             Span::styled("Active Organs: ", Style::default().fg(TEXT_MUTED)),
-            Span::styled("11 / 11 Online", Style::default().fg(CYBER_GREEN).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "11 / 11 Online",
+                Style::default()
+                    .fg(CYBER_GREEN)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]),
         Line::from(vec![
             Span::styled("Fault Tolerance: ", Style::default().fg(TEXT_MUTED)),
@@ -515,14 +562,26 @@ fn render_overview_tab(f: &mut ratatui::Frame, area: Rect, app: &AppState) {
         ]),
         Line::from(vec![
             Span::styled("Nerves Stream: ", Style::default().fg(TEXT_MUTED)),
-            Span::styled("events.> (JetStream live)", Style::default().fg(Color::White)),
+            Span::styled(
+                "events.> (JetStream live)",
+                Style::default().fg(Color::White),
+            ),
         ]),
         Line::from(vec![
             Span::styled("Signing: ", Style::default().fg(TEXT_MUTED)),
-            Span::styled("Apple Developer ID [ENFORCED]", Style::default().fg(CYBER_GREEN)),
+            Span::styled(
+                "Apple Developer ID [ENFORCED]",
+                Style::default().fg(CYBER_GREEN),
+            ),
         ]),
     ])
-    .block(Block::default().title(" Organ Mesh Status ").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(Color::Rgb(50, 65, 85))));
+    .block(
+        Block::default()
+            .title(" Organ Mesh Status ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::Rgb(50, 65, 85))),
+    );
     f.render_widget(mesh_summary, left[3]);
 
     // Right Split: DAG Workflows + Recent Activity
@@ -625,7 +684,9 @@ fn render_workflows_tab(f: &mut ratatui::Frame, area: Rect, app: &AppState) {
 
 fn render_mesh_tab(f: &mut ratatui::Frame, area: Rect, _app: &AppState) {
     let rows = DEFAULT_ORGANS.iter().map(|o| {
-        let status_style = Style::default().fg(CYBER_GREEN).add_modifier(Modifier::BOLD);
+        let status_style = Style::default()
+            .fg(CYBER_GREEN)
+            .add_modifier(Modifier::BOLD);
         Row::new(vec![
             Cell::from(o.name).style(Style::default().fg(CYBER_BLUE).add_modifier(Modifier::BOLD)),
             Cell::from(o.role).style(Style::default().fg(Color::White)),
@@ -646,8 +707,14 @@ fn render_mesh_tab(f: &mut ratatui::Frame, area: Rect, _app: &AppState) {
         ],
     )
     .header(
-        Row::new(vec!["Organ Binary", "Responsibility / Role", "Domain", "Port", "Health"])
-            .style(Style::default().fg(CYBER_BLUE).add_modifier(Modifier::BOLD)),
+        Row::new(vec![
+            "Organ Binary",
+            "Responsibility / Role",
+            "Domain",
+            "Port",
+            "Health",
+        ])
+        .style(Style::default().fg(CYBER_BLUE).add_modifier(Modifier::BOLD)),
     )
     .block(
         Block::default()
@@ -667,16 +734,33 @@ fn render_brain_tab(f: &mut ratatui::Frame, area: Rect, app: &AppState) {
 
     let brain_header = Paragraph::new(vec![
         Line::from(vec![
-            Span::styled("agent-brain: ", Style::default().fg(CYBER_PURPLE).add_modifier(Modifier::BOLD)),
-            Span::styled("Unified MCP Router, Vector Memory & Skill Registry", Style::default().fg(Color::White)),
+            Span::styled(
+                "agent-brain: ",
+                Style::default()
+                    .fg(CYBER_PURPLE)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Unified MCP Router, Vector Memory & Skill Registry",
+                Style::default().fg(Color::White),
+            ),
         ]),
         Line::from("SQLite durable memory store: ~/.autonomic/memory/brain.db"),
         Line::from(vec![
             Span::styled("Enforcement: ", Style::default().fg(TEXT_MUTED)),
-            Span::styled("route_task turn gate • store_memory task exit gate", Style::default().fg(CYBER_GREEN)),
+            Span::styled(
+                "route_task turn gate • store_memory task exit gate",
+                Style::default().fg(CYBER_GREEN),
+            ),
         ]),
     ])
-    .block(Block::default().title(" Neural Architecture & Policy ").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(CYBER_PURPLE)));
+    .block(
+        Block::default()
+            .title(" Neural Architecture & Policy ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(CYBER_PURPLE)),
+    );
     f.render_widget(brain_header, chunks[0]);
 
     let items: Vec<ListItem> = app
@@ -726,13 +810,37 @@ fn render_logs_tab(f: &mut ratatui::Frame, area: Rect, app: &AppState) {
 
 fn render_footer(f: &mut ratatui::Frame, area: Rect) {
     let footer = Paragraph::new(Line::from(vec![
-        Span::styled(" [1-5] ", Style::default().fg(Color::Black).bg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " [1-5] ",
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" Switch Page  ", Style::default().fg(TEXT_MUTED)),
-        Span::styled(" [Tab/Arrows] ", Style::default().fg(Color::Black).bg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " [Tab/Arrows] ",
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" Cycle Tabs  ", Style::default().fg(TEXT_MUTED)),
-        Span::styled(" [r] ", Style::default().fg(Color::Black).bg(CYBER_BLUE).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " [r] ",
+            Style::default()
+                .fg(Color::Black)
+                .bg(CYBER_BLUE)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" Refresh  ", Style::default().fg(TEXT_MUTED)),
-        Span::styled(" [q/Esc] ", Style::default().fg(Color::Black).bg(CYBER_RED).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " [q/Esc] ",
+            Style::default()
+                .fg(Color::Black)
+                .bg(CYBER_RED)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" Exit", Style::default().fg(TEXT_MUTED)),
     ]));
     f.render_widget(footer, area);
