@@ -13,7 +13,14 @@ A blazingly fast, multi-threaded Rust terminal user interface (TUI) for the Auto
 
 ## Installation
 
-### Via Autonomic CLI (Recommended)
+### Homebrew (macOS — Recommended)
+
+```bash
+brew tap autonomic-ai-dev/tap
+brew install agent-tui
+```
+
+### Via Autonomic CLI
 You do not need to clone this repository to use the TUI. The Autonomic CLI handles downloading the latest release for your architecture automatically:
 ```bash
 autonomic tui
