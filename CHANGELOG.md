@@ -1,16 +1,17 @@
-## [Unreleased]
-
-### Changed
-
-- **CI** — path filter + PR skip for non-runtime docs (aligned with agent-brain)
-- **Docs** — add `docs/CONTEXT.md` for agents
-
 # Changelog
 
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.0.0-beta.1] - 2026-10-16
+
+### Changed
+- Unified ecosystem versioning to 1.0.0-beta.1
+- Dynamic GitHub pre-release flag in release workflows for beta/rc/alpha tags
+- CI strictly arm64 macOS native runners with Developer ID code signing
+- Aligned documentation and CI path filters with agent-brain
 
 ## [0.1.2] - 2026-07-18
 
