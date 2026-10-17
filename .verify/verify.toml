@@ -1,0 +1,8 @@
+[verify]
+commands = [
+  "cargo test",
+  "cargo clippy -- -D warnings",
+  "cargo check",
+  ".verify/playbooks/verify_full_suite.sh",
+  ".verify/playbooks/verify_usage_tab.sh",
+]

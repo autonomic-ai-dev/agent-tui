@@ -18,6 +18,9 @@ use ratatui::{
 use std::{io, time::Duration};
 use tokio::sync::mpsc;
 
+mod usage_tab;
+use usage_tab::{ModelUsageRow, UsageViewData, render_usage_tab};
+
 const CYBER_BLUE: Color = Color::Rgb(0, 229, 255);
 const CYBER_GREEN: Color = Color::Rgb(0, 255, 157);
 const CYBER_PURPLE: Color = Color::Rgb(179, 0, 255);
@@ -33,6 +36,7 @@ enum Tab {
     Mesh = 2,
     Brain = 3,
     Logs = 4,
+    Usage = 5,
 }
 
 impl Tab {
@@ -44,6 +48,7 @@ impl Tab {
             2 => Tab::Mesh,
             3 => Tab::Brain,
             4 => Tab::Logs,
+            5 => Tab::Usage,
             _ => Tab::Overview,
         }
     }
@@ -59,6 +64,7 @@ impl Tab {
             Tab::Mesh => " 3: ORGAN MESH ",
             Tab::Brain => " 4: BRAIN CONTEXT ",
             Tab::Logs => " 5: EVENT STREAM ",
+            Tab::Usage => " 6: USAGE & BUDGET ",
         }
     }
 
@@ -68,17 +74,19 @@ impl Tab {
             Tab::Workflows => Tab::Mesh,
             Tab::Mesh => Tab::Brain,
             Tab::Brain => Tab::Logs,
-            Tab::Logs => Tab::Overview,
+            Tab::Logs => Tab::Usage,
+            Tab::Usage => Tab::Overview,
         }
     }
 
     fn prev(self) -> Self {
         match self {
-            Tab::Overview => Tab::Logs,
+            Tab::Overview => Tab::Usage,
             Tab::Workflows => Tab::Overview,
             Tab::Mesh => Tab::Workflows,
             Tab::Brain => Tab::Mesh,
             Tab::Logs => Tab::Brain,
+            Tab::Usage => Tab::Logs,
         }
     }
 }
@@ -191,6 +199,7 @@ struct AppState {
     running: bool,
     nats_connected: bool,
     nats_url: String,
+    usage_data: UsageViewData,
 }
 
 impl AppState {
@@ -215,6 +224,7 @@ impl AppState {
             running: true,
             nats_connected: false,
             nats_url,
+            usage_data: UsageViewData::default(),
         }
     }
 
@@ -228,7 +238,72 @@ impl AppState {
 
     fn update_from_nats(&mut self, subject: &str, payload: &str) {
         self.event_count += 1;
-        if subject.starts_with("events.heart") {
+        if subject == "events.heart.usage" {
+            self.usage_data.today_calls += 1;
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) {
+                if let Some(cost) = v.get("estimated_cost_usd").and_then(|c| c.as_f64()) {
+                    self.usage_data.today_spend_usd += cost;
+                }
+                let model = v.get("model").and_then(|m| m.as_str()).unwrap_or("unknown");
+                let provider = v
+                    .get("provider")
+                    .and_then(|p| p.as_str())
+                    .unwrap_or("unknown");
+                let prompt = v.get("prompt_tokens").and_then(|p| p.as_u64()).unwrap_or(0);
+                let compl = v
+                    .get("completion_tokens")
+                    .and_then(|c| c.as_u64())
+                    .unwrap_or(0);
+                let cache = v
+                    .get("cache_read_tokens")
+                    .and_then(|c| c.as_u64())
+                    .unwrap_or(0);
+                let cost = v
+                    .get("estimated_cost_usd")
+                    .and_then(|c| c.as_f64())
+                    .unwrap_or(0.0);
+                let billing = v
+                    .get("billing_type")
+                    .and_then(|b| b.as_str())
+                    .unwrap_or("metered_api");
+
+                if let Some(row) = self
+                    .usage_data
+                    .model_breakdowns
+                    .iter_mut()
+                    .find(|r| r.model == model)
+                {
+                    row.calls += 1;
+                    row.prompt_tokens += prompt;
+                    row.completion_tokens += compl;
+                    row.cache_read += cache;
+                    row.estimated_cost_usd += cost;
+                } else {
+                    self.usage_data.model_breakdowns.push(ModelUsageRow {
+                        provider: provider.to_string(),
+                        model: model.to_string(),
+                        calls: 1,
+                        prompt_tokens: prompt,
+                        completion_tokens: compl,
+                        cache_read: cache,
+                        estimated_cost_usd: cost,
+                        billing_type: billing.to_string(),
+                    });
+                }
+            }
+            self.push_log(format!("[USAGE] Recorded turn usage on {subject}"));
+        } else if subject == "events.heart.quota" {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(payload)
+                && let Some(pct) = v.get("utilization_pct").and_then(|u| u.as_f64())
+            {
+                self.usage_data.sub_claude_quota_pct = (pct as u16).min(100);
+            }
+            self.push_log("[QUOTA] Updated provider subscription window".into());
+        } else if subject == "events.heart.budget.alert" {
+            self.push_log(format!(
+                "[ALERT] Budget alert threshold exceeded: {payload}"
+            ));
+        } else if subject.starts_with("events.heart") {
             if let Some(cpu_str) = payload
                 .split("CPU: ")
                 .nth(1)
@@ -343,6 +418,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     KeyCode::Char('3') => app.active_tab = Tab::Mesh,
                     KeyCode::Char('4') => app.active_tab = Tab::Brain,
                     KeyCode::Char('5') => app.active_tab = Tab::Logs,
+                    KeyCode::Char('6') => app.active_tab = Tab::Usage,
                     KeyCode::Tab | KeyCode::Right => app.active_tab = app.active_tab.next(),
                     KeyCode::BackTab | KeyCode::Left => app.active_tab = app.active_tab.prev(),
                     KeyCode::Char('r') => {
@@ -391,6 +467,7 @@ fn ui(f: &mut ratatui::Frame, app: &AppState) {
         Tab::Mesh => render_mesh_tab(f, layout[2], app),
         Tab::Brain => render_brain_tab(f, layout[2], app),
         Tab::Logs => render_logs_tab(f, layout[2], app),
+        Tab::Usage => render_usage_tab(f, layout[2], &app.usage_data),
     }
 
     render_footer(f, layout[3]);
@@ -459,6 +536,7 @@ fn render_tabs(f: &mut ratatui::Frame, area: Rect, app: &AppState) {
         Tab::Mesh.title(),
         Tab::Brain.title(),
         Tab::Logs.title(),
+        Tab::Usage.title(),
     ]
     .iter()
     .map(|t| Line::from(Span::raw(*t)))
@@ -811,7 +889,7 @@ fn render_logs_tab(f: &mut ratatui::Frame, area: Rect, app: &AppState) {
 fn render_footer(f: &mut ratatui::Frame, area: Rect) {
     let footer = Paragraph::new(Line::from(vec![
         Span::styled(
-            " [1-5] ",
+            " [1-6] ",
             Style::default()
                 .fg(Color::Black)
                 .bg(Color::White)
@@ -844,4 +922,89 @@ fn render_footer(f: &mut ratatui::Frame, area: Rect) {
         Span::styled(" Exit", Style::default().fg(TEXT_MUTED)),
     ]));
     f.render_widget(footer, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tab_cycling() {
+        // Arrange
+        let mut tab = Tab::Overview;
+
+        // Act & Assert cycle forward
+        tab = tab.next();
+        assert_eq!(tab, Tab::Workflows);
+        tab = tab.next();
+        assert_eq!(tab, Tab::Mesh);
+        tab = tab.next();
+        assert_eq!(tab, Tab::Brain);
+        tab = tab.next();
+        assert_eq!(tab, Tab::Logs);
+        tab = tab.next();
+        assert_eq!(tab, Tab::Usage);
+        tab = tab.next();
+        assert_eq!(tab, Tab::Overview);
+
+        // Act & Assert cycle backward
+        tab = tab.prev();
+        assert_eq!(tab, Tab::Usage);
+        tab = tab.prev();
+        assert_eq!(tab, Tab::Logs);
+    }
+
+    #[test]
+    fn test_update_from_nats_usage_event() {
+        // Arrange
+        let mut state = AppState::new("nats://127.0.0.1:4222".into());
+        let initial_spend = state.usage_data.today_spend_usd;
+        let initial_calls = state.usage_data.today_calls;
+
+        let usage_json = r#"{
+            "id": "evt-test-1",
+            "timestamp": 1700000000,
+            "session_id": null,
+            "organ": "agent-brain",
+            "provider": "anthropic",
+            "model": "claude-3-7-sonnet",
+            "billing_type": "metered_api",
+            "prompt_tokens": 10000,
+            "completion_tokens": 2000,
+            "cache_read_tokens": 5000,
+            "cache_write_tokens": 0,
+            "estimated_cost_usd": 0.0615,
+            "latency_ms": 900
+        }"#;
+
+        // Act
+        state.update_from_nats("events.heart.usage", usage_json);
+
+        // Assert
+        assert_eq!(state.usage_data.today_calls, initial_calls + 1);
+        assert!((state.usage_data.today_spend_usd - (initial_spend + 0.0615)).abs() < 1e-4);
+        assert_eq!(state.event_count, 1);
+    }
+
+    #[test]
+    fn test_update_from_nats_quota_event() {
+        // Arrange
+        let mut state = AppState::new("nats://127.0.0.1:4222".into());
+
+        let quota_json = r#"{
+            "provider": "anthropic",
+            "account_or_tier": "claude-code-sub",
+            "window_type": "5h_rolling",
+            "utilization_pct": 58.5,
+            "reset_at": 1700007200,
+            "rate_limit_remaining": 150000,
+            "updated_at": 1700000000
+        }"#;
+
+        // Act
+        state.update_from_nats("events.heart.quota", quota_json);
+
+        // Assert
+        assert_eq!(state.usage_data.sub_claude_quota_pct, 58);
+    }
 }
