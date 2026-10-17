@@ -1,8 +1,8 @@
 # Autonomic AI Terminal Dashboard (`agent-tui`)
 
-Agent context: [docs/CONTEXT.md](docs/CONTEXT.md).
+Agent context: [CONTEXT.md](CONTEXT.md) · Telemetry Guide: [https://autonomic-ai.dev/docs/telemetry](https://autonomic-ai.dev/docs/telemetry) · Architecture: [https://autonomic-ai.dev/docs/architecture](https://autonomic-ai.dev/docs/architecture).
 
-A blazingly fast, multi-threaded Rust terminal user interface (TUI) for the Autonomic AI ecosystem. It connects directly to the local NATS event bus to give developers unprecedented visibility into agent execution without leaving the terminal.
+**Cloud-Native role: Terminal UI** (`k9s` / `htop` analog) — real-time organ health, DAG workflows, and sandbox logs.
 
 ## Features
 
