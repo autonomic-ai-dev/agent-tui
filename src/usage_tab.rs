@@ -266,8 +266,14 @@ fn render_model_table(f: &mut ratatui::Frame, area: Rect, data: &UsageViewData) 
 
     let rows: Vec<Row> = if data.model_breakdowns.is_empty() {
         vec![Row::new(vec![
-            Cell::from(Span::styled("No telemetry yet", Style::default().fg(TEXT_MUTED))),
-            Cell::from(Span::styled("[Awaiting live events on events.heart.usage...]", Style::default().fg(CYBER_BLUE))),
+            Cell::from(Span::styled(
+                "No telemetry yet",
+                Style::default().fg(TEXT_MUTED),
+            )),
+            Cell::from(Span::styled(
+                "[Awaiting live events on events.heart.usage...]",
+                Style::default().fg(CYBER_BLUE),
+            )),
             Cell::from(Span::styled("0", Style::default().fg(TEXT_MUTED))),
             Cell::from(Span::styled("0", Style::default().fg(TEXT_MUTED))),
             Cell::from(Span::styled("0", Style::default().fg(TEXT_MUTED))),
@@ -279,37 +285,37 @@ fn render_model_table(f: &mut ratatui::Frame, area: Rect, data: &UsageViewData) 
         data.model_breakdowns
             .iter()
             .map(|m| {
-            let cost_color = if m.estimated_cost_usd > 0.0 {
-                CYBER_GREEN
-            } else {
-                TEXT_MUTED
-            };
-            let type_color = match m.billing_type.as_str() {
-                "Subscription" => CYBER_PURPLE,
-                "Local Free" => CYBER_BLUE,
-                _ => Color::White,
-            };
-            Row::new(vec![
-                Cell::from(m.provider.clone()),
-                Cell::from(Span::styled(
-                    m.model.clone(),
-                    Style::default().fg(CYBER_BLUE),
-                )),
-                Cell::from(format!("{}", m.calls)),
-                Cell::from(format_num(m.prompt_tokens)),
-                Cell::from(format_num(m.completion_tokens)),
-                Cell::from(format_num(m.cache_read)),
-                Cell::from(Span::styled(
-                    format!("${:.2}", m.estimated_cost_usd),
-                    Style::default().fg(cost_color),
-                )),
-                Cell::from(Span::styled(
-                    m.billing_type.clone(),
-                    Style::default().fg(type_color),
-                )),
-            ])
-        })
-        .collect()
+                let cost_color = if m.estimated_cost_usd > 0.0 {
+                    CYBER_GREEN
+                } else {
+                    TEXT_MUTED
+                };
+                let type_color = match m.billing_type.as_str() {
+                    "Subscription" => CYBER_PURPLE,
+                    "Local Free" => CYBER_BLUE,
+                    _ => Color::White,
+                };
+                Row::new(vec![
+                    Cell::from(m.provider.clone()),
+                    Cell::from(Span::styled(
+                        m.model.clone(),
+                        Style::default().fg(CYBER_BLUE),
+                    )),
+                    Cell::from(format!("{}", m.calls)),
+                    Cell::from(format_num(m.prompt_tokens)),
+                    Cell::from(format_num(m.completion_tokens)),
+                    Cell::from(format_num(m.cache_read)),
+                    Cell::from(Span::styled(
+                        format!("${:.2}", m.estimated_cost_usd),
+                        Style::default().fg(cost_color),
+                    )),
+                    Cell::from(Span::styled(
+                        m.billing_type.clone(),
+                        Style::default().fg(type_color),
+                    )),
+                ])
+            })
+            .collect()
     };
 
     let widths = [

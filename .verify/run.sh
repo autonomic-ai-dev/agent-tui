@@ -10,6 +10,9 @@ REPO_ROOT="$(cd "$DIR/.." && pwd)"
 echo "==> [agent-tui] Starting verification suite..."
 cd "$REPO_ROOT"
 
+echo "==> Checking cargo fmt..."
+cargo fmt -- --check
+
 echo "==> Checking cargo clippy with -D warnings..."
 cargo clippy -- -D warnings
 

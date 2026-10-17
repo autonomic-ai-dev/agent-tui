@@ -987,7 +987,10 @@ mod tests {
         assert_eq!(state.usage_data.today_calls, initial_calls + 1);
         assert!((state.usage_data.today_spend_usd - (initial_spend + 0.0615)).abs() < 1e-4);
         assert_eq!(state.usage_data.model_breakdowns.len(), 1);
-        assert_eq!(state.usage_data.model_breakdowns[0].model, "claude-3-7-sonnet");
+        assert_eq!(
+            state.usage_data.model_breakdowns[0].model,
+            "claude-3-7-sonnet"
+        );
         assert_eq!(state.event_count, 1);
     }
 
