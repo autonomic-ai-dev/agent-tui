@@ -19,7 +19,7 @@ use std::{io, time::Duration};
 use tokio::sync::mpsc;
 
 mod usage_tab;
-use usage_tab::{render_usage_tab, ModelUsageRow, UsageViewData};
+use usage_tab::{ModelUsageRow, UsageViewData, render_usage_tab};
 
 const CYBER_BLUE: Color = Color::Rgb(0, 229, 255);
 const CYBER_GREEN: Color = Color::Rgb(0, 255, 157);
@@ -90,7 +90,6 @@ impl Tab {
         }
     }
 }
-
 
 #[derive(Debug, Clone)]
 struct OrganMeta {
@@ -246,14 +245,34 @@ impl AppState {
                     self.usage_data.today_spend_usd += cost;
                 }
                 let model = v.get("model").and_then(|m| m.as_str()).unwrap_or("unknown");
-                let provider = v.get("provider").and_then(|p| p.as_str()).unwrap_or("unknown");
+                let provider = v
+                    .get("provider")
+                    .and_then(|p| p.as_str())
+                    .unwrap_or("unknown");
                 let prompt = v.get("prompt_tokens").and_then(|p| p.as_u64()).unwrap_or(0);
-                let compl = v.get("completion_tokens").and_then(|c| c.as_u64()).unwrap_or(0);
-                let cache = v.get("cache_read_tokens").and_then(|c| c.as_u64()).unwrap_or(0);
-                let cost = v.get("estimated_cost_usd").and_then(|c| c.as_f64()).unwrap_or(0.0);
-                let billing = v.get("billing_type").and_then(|b| b.as_str()).unwrap_or("metered_api");
+                let compl = v
+                    .get("completion_tokens")
+                    .and_then(|c| c.as_u64())
+                    .unwrap_or(0);
+                let cache = v
+                    .get("cache_read_tokens")
+                    .and_then(|c| c.as_u64())
+                    .unwrap_or(0);
+                let cost = v
+                    .get("estimated_cost_usd")
+                    .and_then(|c| c.as_f64())
+                    .unwrap_or(0.0);
+                let billing = v
+                    .get("billing_type")
+                    .and_then(|b| b.as_str())
+                    .unwrap_or("metered_api");
 
-                if let Some(row) = self.usage_data.model_breakdowns.iter_mut().find(|r| r.model == model) {
+                if let Some(row) = self
+                    .usage_data
+                    .model_breakdowns
+                    .iter_mut()
+                    .find(|r| r.model == model)
+                {
                     row.calls += 1;
                     row.prompt_tokens += prompt;
                     row.completion_tokens += compl;
@@ -281,7 +300,9 @@ impl AppState {
             }
             self.push_log("[QUOTA] Updated provider subscription window".into());
         } else if subject == "events.heart.budget.alert" {
-            self.push_log(format!("[ALERT] Budget alert threshold exceeded: {payload}"));
+            self.push_log(format!(
+                "[ALERT] Budget alert threshold exceeded: {payload}"
+            ));
         } else if subject.starts_with("events.heart") {
             if let Some(cpu_str) = payload
                 .split("CPU: ")
@@ -320,7 +341,6 @@ impl AppState {
         }
     }
 }
-
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

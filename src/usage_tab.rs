@@ -137,12 +137,14 @@ fn render_top_cards(f: &mut ratatui::Frame, area: Rect, data: &UsageViewData) {
             ),
             Span::styled("USD", Style::default().fg(TEXT_MUTED)),
         ]),
-        Line::from(vec![
-            Span::styled(format!("Across {} turn calls", data.today_calls), Style::default().fg(Color::White)),
-        ]),
-        Line::from(vec![
-            Span::styled(format!("Avg: ${:.3} / turn", avg_turn), Style::default().fg(TEXT_MUTED)),
-        ]),
+        Line::from(vec![Span::styled(
+            format!("Across {} turn calls", data.today_calls),
+            Style::default().fg(Color::White),
+        )]),
+        Line::from(vec![Span::styled(
+            format!("Avg: ${:.3} / turn", avg_turn),
+            Style::default().fg(TEXT_MUTED),
+        )]),
     ];
     let spend_card = Paragraph::new(spend_text).block(
         Block::default()
@@ -164,22 +166,26 @@ fn render_top_cards(f: &mut ratatui::Frame, area: Rect, data: &UsageViewData) {
         CYBER_GREEN
     };
 
-    let budget_header = Paragraph::new(vec![
-        Line::from(vec![
-            Span::styled(
-                format!("${:.2} REMAINING ", remaining),
-                Style::default().fg(budget_color).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(format!("of ${:.2}", data.monthly_ceiling_usd), Style::default().fg(TEXT_MUTED)),
-        ]),
-    ]);
+    let budget_header = Paragraph::new(vec![Line::from(vec![
+        Span::styled(
+            format!("${:.2} REMAINING ", remaining),
+            Style::default()
+                .fg(budget_color)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("of ${:.2}", data.monthly_ceiling_usd),
+            Style::default().fg(TEXT_MUTED),
+        ),
+    ])]);
     let budget_gauge = Gauge::default()
         .gauge_style(Style::default().fg(budget_color).bg(Color::Rgb(30, 40, 50)))
         .percent(budget_pct)
         .label(format!("{}% Used", budget_pct));
-    let burn_text = Paragraph::new(Line::from(vec![
-        Span::styled(format!("Burn Rate: ${:.2} / day", data.burn_rate_usd), Style::default().fg(TEXT_MUTED)),
-    ]));
+    let burn_text = Paragraph::new(Line::from(vec![Span::styled(
+        format!("Burn Rate: ${:.2} / day", data.burn_rate_usd),
+        Style::default().fg(TEXT_MUTED),
+    )]));
 
     let budget_card_block = Block::default()
         .title(" 2. MONTHLY BUDGET ")
@@ -191,7 +197,11 @@ fn render_top_cards(f: &mut ratatui::Frame, area: Rect, data: &UsageViewData) {
     let inner_col = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
-        .constraints([Constraint::Length(2), Constraint::Length(1), Constraint::Length(2)])
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Length(1),
+            Constraint::Length(2),
+        ])
         .split(cols[1]);
     f.render_widget(budget_header, inner_col[0]);
     f.render_widget(budget_gauge, inner_col[1]);
@@ -205,7 +215,10 @@ fn render_top_cards(f: &mut ratatui::Frame, area: Rect, data: &UsageViewData) {
         .split(cols[2]);
 
     let claude_gauge = Gauge::default()
-        .block(Block::default().title(format!("Claude Code (5h) • Resets in {}", data.sub_claude_reset_str)))
+        .block(Block::default().title(format!(
+            "Claude Code (5h) • Resets in {}",
+            data.sub_claude_reset_str
+        )))
         .gauge_style(Style::default().fg(CYBER_PURPLE).bg(Color::Rgb(30, 40, 50)))
         .percent(data.sub_claude_quota_pct);
 
@@ -240,14 +253,54 @@ fn format_num(n: u64) -> String {
 
 fn render_model_table(f: &mut ratatui::Frame, area: Rect, data: &UsageViewData) {
     let header = Row::new(vec![
-        Cell::from(Span::styled("PROVIDER", Style::default().fg(CYBER_YELLOW).add_modifier(Modifier::BOLD))),
-        Cell::from(Span::styled("MODEL", Style::default().fg(CYBER_YELLOW).add_modifier(Modifier::BOLD))),
-        Cell::from(Span::styled("CALLS", Style::default().fg(CYBER_YELLOW).add_modifier(Modifier::BOLD))),
-        Cell::from(Span::styled("PROMPT TOK", Style::default().fg(CYBER_YELLOW).add_modifier(Modifier::BOLD))),
-        Cell::from(Span::styled("COMPL TOK", Style::default().fg(CYBER_YELLOW).add_modifier(Modifier::BOLD))),
-        Cell::from(Span::styled("CACHE READ", Style::default().fg(CYBER_YELLOW).add_modifier(Modifier::BOLD))),
-        Cell::from(Span::styled("EST. COST", Style::default().fg(CYBER_YELLOW).add_modifier(Modifier::BOLD))),
-        Cell::from(Span::styled("BILLING TYPE", Style::default().fg(CYBER_YELLOW).add_modifier(Modifier::BOLD))),
+        Cell::from(Span::styled(
+            "PROVIDER",
+            Style::default()
+                .fg(CYBER_YELLOW)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Cell::from(Span::styled(
+            "MODEL",
+            Style::default()
+                .fg(CYBER_YELLOW)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Cell::from(Span::styled(
+            "CALLS",
+            Style::default()
+                .fg(CYBER_YELLOW)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Cell::from(Span::styled(
+            "PROMPT TOK",
+            Style::default()
+                .fg(CYBER_YELLOW)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Cell::from(Span::styled(
+            "COMPL TOK",
+            Style::default()
+                .fg(CYBER_YELLOW)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Cell::from(Span::styled(
+            "CACHE READ",
+            Style::default()
+                .fg(CYBER_YELLOW)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Cell::from(Span::styled(
+            "EST. COST",
+            Style::default()
+                .fg(CYBER_YELLOW)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Cell::from(Span::styled(
+            "BILLING TYPE",
+            Style::default()
+                .fg(CYBER_YELLOW)
+                .add_modifier(Modifier::BOLD),
+        )),
     ])
     .height(1)
     .bottom_margin(1);
@@ -268,13 +321,22 @@ fn render_model_table(f: &mut ratatui::Frame, area: Rect, data: &UsageViewData) 
             };
             Row::new(vec![
                 Cell::from(m.provider.clone()),
-                Cell::from(Span::styled(m.model.clone(), Style::default().fg(CYBER_BLUE))),
+                Cell::from(Span::styled(
+                    m.model.clone(),
+                    Style::default().fg(CYBER_BLUE),
+                )),
                 Cell::from(format!("{}", m.calls)),
                 Cell::from(format_num(m.prompt_tokens)),
                 Cell::from(format_num(m.completion_tokens)),
                 Cell::from(format_num(m.cache_read)),
-                Cell::from(Span::styled(format!("${:.2}", m.estimated_cost_usd), Style::default().fg(cost_color))),
-                Cell::from(Span::styled(m.billing_type.clone(), Style::default().fg(type_color))),
+                Cell::from(Span::styled(
+                    format!("${:.2}", m.estimated_cost_usd),
+                    Style::default().fg(cost_color),
+                )),
+                Cell::from(Span::styled(
+                    m.billing_type.clone(),
+                    Style::default().fg(type_color),
+                )),
             ])
         })
         .collect();
@@ -290,15 +352,13 @@ fn render_model_table(f: &mut ratatui::Frame, area: Rect, data: &UsageViewData) 
         Constraint::Min(14),
     ];
 
-    let table = Table::new(rows, widths)
-        .header(header)
-        .block(
-            Block::default()
-                .title(" PROVIDER & MODEL BREAKDOWN ")
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(CYBER_BLUE)),
-        );
+    let table = Table::new(rows, widths).header(header).block(
+        Block::default()
+            .title(" PROVIDER & MODEL BREAKDOWN ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(CYBER_BLUE)),
+    );
 
     f.render_widget(table, area);
 }
@@ -306,22 +366,39 @@ fn render_model_table(f: &mut ratatui::Frame, area: Rect, data: &UsageViewData) 
 fn render_forecast_banner(f: &mut ratatui::Frame, area: Rect, data: &UsageViewData) {
     let projected_spend = data.today_spend_usd + (data.burn_rate_usd * 25.0);
     let status_str = if projected_spend <= data.monthly_ceiling_usd {
-        format!("Projected Month-End: ${:.2} (WITHIN ${:.2} CEILING) │ Soft Alert Gate: 80% (${:.2})",
-            projected_spend, data.monthly_ceiling_usd, data.monthly_ceiling_usd * 0.8)
+        format!(
+            "Projected Month-End: ${:.2} (WITHIN ${:.2} CEILING) │ Soft Alert Gate: 80% (${:.2})",
+            projected_spend,
+            data.monthly_ceiling_usd,
+            data.monthly_ceiling_usd * 0.8
+        )
     } else {
-        format!("Projected Month-End: ${:.2} (OVER ${:.2} CEILING) │ CRITICAL ALERT TRIGGERED",
-            projected_spend, data.monthly_ceiling_usd)
+        format!(
+            "Projected Month-End: ${:.2} (OVER ${:.2} CEILING) │ CRITICAL ALERT TRIGGERED",
+            projected_spend, data.monthly_ceiling_usd
+        )
     };
 
     let text = vec![
+        Line::from(vec![Span::styled(
+            status_str,
+            Style::default()
+                .fg(CYBER_GREEN)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(vec![
-            Span::styled(status_str, Style::default().fg(CYBER_GREEN).add_modifier(Modifier::BOLD)),
-        ]),
-        Line::from(vec![
-            Span::styled(" [▲ STABLE] ", Style::default().fg(Color::Black).bg(CYBER_GREEN).add_modifier(Modifier::BOLD)),
             Span::styled(
-                format!(" Token savings from brain cache deduplication: {:.1}% (estimated ~${:.2} saved this week)",
-                    data.cache_savings_pct, data.cache_dollars_saved),
+                " [▲ STABLE] ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(CYBER_GREEN)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(
+                    " Token savings from brain cache deduplication: {:.1}% (estimated ~${:.2} saved this week)",
+                    data.cache_savings_pct, data.cache_dollars_saved
+                ),
                 Style::default().fg(Color::White),
             ),
         ]),
