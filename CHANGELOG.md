@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [1.0.0-beta.3] - 2026-10-17
+
+### Added
+- **Stitch Mission Control Dashboard** — Multi-page terminal dashboard HUD aligned with cyber aerospace design system.
+- Added comprehensive `CONTEXT.md` in repository root.
+
+### Changed
+- Bumped version to `v1.0.0-beta.3`.
+
+## [1.0.0-beta.2] - 2026-10-16
+
+### Added
+- Official Homebrew tap formula support (`brew install agent-tui`).
+
+### Changed
+- Consolidated architecture documentation into centralized ecosystem hub.
 
 ## [1.0.0-beta.1] - 2026-10-16
 
