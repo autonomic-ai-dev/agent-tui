@@ -491,7 +491,10 @@ fn render_header(f: &mut ratatui::Frame, area: Rect, app: &AppState) {
                 .bg(CYBER_BLUE)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" v1.0.0-beta.1", Style::default().fg(CYBER_BLUE)),
+        Span::styled(
+            concat!(" v", env!("CARGO_PKG_VERSION")),
+            Style::default().fg(CYBER_BLUE),
+        ),
     ]));
     f.render_widget(logo, chunks[0]);
 
@@ -983,6 +986,8 @@ mod tests {
         // Assert
         assert_eq!(state.usage_data.today_calls, initial_calls + 1);
         assert!((state.usage_data.today_spend_usd - (initial_spend + 0.0615)).abs() < 1e-4);
+        assert_eq!(state.usage_data.model_breakdowns.len(), 1);
+        assert_eq!(state.usage_data.model_breakdowns[0].model, "claude-3-7-sonnet");
         assert_eq!(state.event_count, 1);
     }
 
