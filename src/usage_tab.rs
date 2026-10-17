@@ -41,57 +41,16 @@ pub struct UsageViewData {
 impl Default for UsageViewData {
     fn default() -> Self {
         Self {
-            today_spend_usd: 8.42,
-            today_calls: 142,
+            today_spend_usd: 0.0,
+            today_calls: 0,
             monthly_ceiling_usd: 100.0,
-            burn_rate_usd: 3.12,
-            sub_claude_quota_pct: 42,
-            sub_claude_reset_str: "2h 14m (18:20 UTC)".to_string(),
-            sub_openai_tpm_pct: 21,
-            model_breakdowns: vec![
-                ModelUsageRow {
-                    provider: "Anthropic".into(),
-                    model: "claude-3-7-sonnet".into(),
-                    calls: 84,
-                    prompt_tokens: 842_120,
-                    completion_tokens: 114_200,
-                    cache_read: 620_100,
-                    estimated_cost_usd: 6.18,
-                    billing_type: "Metered API".into(),
-                },
-                ModelUsageRow {
-                    provider: "OpenAI".into(),
-                    model: "gpt-4o".into(),
-                    calls: 38,
-                    prompt_tokens: 210_400,
-                    completion_tokens: 42_800,
-                    cache_read: 0,
-                    estimated_cost_usd: 1.42,
-                    billing_type: "Metered API".into(),
-                },
-                ModelUsageRow {
-                    provider: "Anthropic".into(),
-                    model: "claude-code-sub".into(),
-                    calls: 20,
-                    prompt_tokens: 640_000,
-                    completion_tokens: 78_000,
-                    cache_read: 410_000,
-                    estimated_cost_usd: 0.00,
-                    billing_type: "Subscription".into(),
-                },
-                ModelUsageRow {
-                    provider: "Local".into(),
-                    model: "deepseek-r1:8b".into(),
-                    calls: 45,
-                    prompt_tokens: 124_000,
-                    completion_tokens: 32_100,
-                    cache_read: 0,
-                    estimated_cost_usd: 0.00,
-                    billing_type: "Local Free".into(),
-                },
-            ],
-            cache_savings_pct: 41.2,
-            cache_dollars_saved: 4.80,
+            burn_rate_usd: 0.0,
+            sub_claude_quota_pct: 0,
+            sub_claude_reset_str: "Standby".to_string(),
+            sub_openai_tpm_pct: 0,
+            model_breakdowns: Vec::new(),
+            cache_savings_pct: 0.0,
+            cache_dollars_saved: 0.0,
         }
     }
 }
@@ -305,41 +264,59 @@ fn render_model_table(f: &mut ratatui::Frame, area: Rect, data: &UsageViewData) 
     .height(1)
     .bottom_margin(1);
 
-    let rows: Vec<Row> = data
-        .model_breakdowns
-        .iter()
-        .map(|m| {
-            let cost_color = if m.estimated_cost_usd > 0.0 {
-                CYBER_GREEN
-            } else {
-                TEXT_MUTED
-            };
-            let type_color = match m.billing_type.as_str() {
-                "Subscription" => CYBER_PURPLE,
-                "Local Free" => CYBER_BLUE,
-                _ => Color::White,
-            };
-            Row::new(vec![
-                Cell::from(m.provider.clone()),
-                Cell::from(Span::styled(
-                    m.model.clone(),
-                    Style::default().fg(CYBER_BLUE),
-                )),
-                Cell::from(format!("{}", m.calls)),
-                Cell::from(format_num(m.prompt_tokens)),
-                Cell::from(format_num(m.completion_tokens)),
-                Cell::from(format_num(m.cache_read)),
-                Cell::from(Span::styled(
-                    format!("${:.2}", m.estimated_cost_usd),
-                    Style::default().fg(cost_color),
-                )),
-                Cell::from(Span::styled(
-                    m.billing_type.clone(),
-                    Style::default().fg(type_color),
-                )),
-            ])
-        })
-        .collect();
+    let rows: Vec<Row> = if data.model_breakdowns.is_empty() {
+        vec![Row::new(vec![
+            Cell::from(Span::styled(
+                "No telemetry yet",
+                Style::default().fg(TEXT_MUTED),
+            )),
+            Cell::from(Span::styled(
+                "[Awaiting live events on events.heart.usage...]",
+                Style::default().fg(CYBER_BLUE),
+            )),
+            Cell::from(Span::styled("0", Style::default().fg(TEXT_MUTED))),
+            Cell::from(Span::styled("0", Style::default().fg(TEXT_MUTED))),
+            Cell::from(Span::styled("0", Style::default().fg(TEXT_MUTED))),
+            Cell::from(Span::styled("0", Style::default().fg(TEXT_MUTED))),
+            Cell::from(Span::styled("$0.00", Style::default().fg(TEXT_MUTED))),
+            Cell::from(Span::styled("Standby", Style::default().fg(TEXT_MUTED))),
+        ])]
+    } else {
+        data.model_breakdowns
+            .iter()
+            .map(|m| {
+                let cost_color = if m.estimated_cost_usd > 0.0 {
+                    CYBER_GREEN
+                } else {
+                    TEXT_MUTED
+                };
+                let type_color = match m.billing_type.as_str() {
+                    "Subscription" => CYBER_PURPLE,
+                    "Local Free" => CYBER_BLUE,
+                    _ => Color::White,
+                };
+                Row::new(vec![
+                    Cell::from(m.provider.clone()),
+                    Cell::from(Span::styled(
+                        m.model.clone(),
+                        Style::default().fg(CYBER_BLUE),
+                    )),
+                    Cell::from(format!("{}", m.calls)),
+                    Cell::from(format_num(m.prompt_tokens)),
+                    Cell::from(format_num(m.completion_tokens)),
+                    Cell::from(format_num(m.cache_read)),
+                    Cell::from(Span::styled(
+                        format!("${:.2}", m.estimated_cost_usd),
+                        Style::default().fg(cost_color),
+                    )),
+                    Cell::from(Span::styled(
+                        m.billing_type.clone(),
+                        Style::default().fg(type_color),
+                    )),
+                ])
+            })
+            .collect()
+    };
 
     let widths = [
         Constraint::Length(12),
@@ -424,9 +401,9 @@ mod tests {
         let data = UsageViewData::default();
 
         // Assert
-        assert_eq!(data.today_calls, 142);
-        assert!((data.today_spend_usd - 8.42).abs() < 1e-4);
-        assert_eq!(data.sub_claude_quota_pct, 42);
-        assert_eq!(data.model_breakdowns.len(), 4);
+        assert_eq!(data.today_calls, 0);
+        assert_eq!(data.today_spend_usd, 0.0);
+        assert_eq!(data.sub_claude_quota_pct, 0);
+        assert!(data.model_breakdowns.is_empty());
     }
 }
