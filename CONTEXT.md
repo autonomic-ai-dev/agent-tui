@@ -1,7 +1,7 @@
 # agent-tui — Deep Operational & Architectural Context for Agents
 
 > **Terminal Observability HUD & Real-Time Mesh Telemetry Console** — In-depth architectural guide, multi-threaded ratatui event loop, NATS subscriber mechanics, keyboard controls, and failure recovery runbooks for `agent-tui`.  
-> **Ecosystem Version Baseline:** `v1.0.0-beta.3`  
+> **Ecosystem Version Baseline:** `v1.0.0-beta.3.2`  
 > **Documentation Hub:** [https://autonomic-ai.dev/docs/telemetry](https://autonomic-ai.dev/docs/telemetry) · [Architecture Hub](https://autonomic-ai.dev/docs/architecture)  
 > **Transport:** Direct NATS JetStream subscriber (`nats://127.0.0.1:4222`) · No dedicated HTTP server port
 
