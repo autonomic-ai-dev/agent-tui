@@ -18,7 +18,13 @@ use ratatui::{
 use std::{io, time::Duration};
 use tokio::sync::mpsc;
 
+mod nats_config;
+mod telemetry_source;
 mod usage_tab;
+use telemetry_source::{
+    LiveOrganStatus, fetch_brain_context, fetch_heart_telemetry, fetch_spine_workflows,
+    fetch_system_metrics, probe_organ_mesh,
+};
 use usage_tab::{ModelUsageRow, UsageViewData, render_usage_tab};
 
 const CYBER_BLUE: Color = Color::Rgb(0, 229, 255);
@@ -92,15 +98,15 @@ impl Tab {
 }
 
 #[derive(Debug, Clone)]
-struct OrganMeta {
-    name: &'static str,
-    role: &'static str,
-    category: &'static str,
-    status: &'static str,
-    port: &'static str,
+pub struct OrganMeta {
+    pub name: &'static str,
+    pub role: &'static str,
+    pub category: &'static str,
+    pub status: &'static str,
+    pub port: &'static str,
 }
 
-const DEFAULT_ORGANS: [OrganMeta; 11] = [
+pub const DEFAULT_ORGANS: [OrganMeta; 11] = [
     OrganMeta {
         name: "agent-body",
         role: "Organ Supervisor / Gateway",
@@ -192,40 +198,82 @@ struct AppState {
     logs: Vec<String>,
     cpu: u16,
     mem: u16,
+    total_mem_gb: u16,
     token_budget_used: u16,
     event_count: u64,
     workflows: Vec<String>,
     context: Vec<String>,
+    organs: Vec<LiveOrganStatus>,
     running: bool,
     nats_connected: bool,
     nats_url: String,
     usage_data: UsageViewData,
+    system_monitor: sysinfo::System,
 }
 
 impl AppState {
     fn new(nats_url: String) -> Self {
+        let root = nats_config::autonomic_root();
+        let mut sys = sysinfo::System::new();
+        let sys_metrics = fetch_system_metrics(&mut sys);
+        let organs = probe_organ_mesh(&DEFAULT_ORGANS);
+        let usage_data = fetch_heart_telemetry(&root).unwrap_or_default();
+        let budget_pct = if usage_data.monthly_ceiling_usd > 0.0 {
+            ((usage_data.today_spend_usd / usage_data.monthly_ceiling_usd) * 100.0).min(100.0)
+                as u16
+        } else {
+            0
+        };
+        let workflows = fetch_spine_workflows(&root);
+        let context = fetch_brain_context(&root);
+
         Self {
             active_tab: Tab::Overview,
             logs: vec![],
-            cpu: 18,
-            mem: 412,
-            token_budget_used: 12,
+            cpu: sys_metrics.cpu_pct,
+            mem: sys_metrics.mem_mb,
+            total_mem_gb: sys_metrics.total_mem_gb,
+            token_budget_used: budget_pct,
             event_count: 0,
-            workflows: vec![
-                "▶ @bugfix (isolate -> patch -> verify) [COMPLETED]".into(),
-                "▶ @mcp-health-check (schema audit -> probe) [COMPLETED]".into(),
-                "▶ @feature-from-spec (plan -> implement -> test) [RUNNING]".into(),
-            ],
-            context: vec![
-                "■ rule: autonomic-agent-mode (route_task gate enforced)".into(),
-                "■ fact: homebrew default install enabled on tap".into(),
-                "■ memory: organ mesh CI bypass resolved from tested commit".into(),
-            ],
+            workflows,
+            context,
+            organs,
             running: true,
             nats_connected: false,
             nats_url,
-            usage_data: UsageViewData::default(),
+            usage_data,
+            system_monitor: sys,
         }
+    }
+
+    fn refresh_system_metrics(&mut self) {
+        let metrics = fetch_system_metrics(&mut self.system_monitor);
+        self.cpu = metrics.cpu_pct;
+        self.mem = metrics.mem_mb;
+        self.total_mem_gb = metrics.total_mem_gb;
+    }
+
+    fn refresh_organ_mesh(&mut self) {
+        self.organs = probe_organ_mesh(&DEFAULT_ORGANS);
+    }
+
+    fn refresh_all_telemetry(&mut self) {
+        let root = nats_config::autonomic_root();
+        self.refresh_system_metrics();
+        self.refresh_organ_mesh();
+        if let Some(usage) = fetch_heart_telemetry(&root) {
+            if usage.monthly_ceiling_usd > 0.0 {
+                self.token_budget_used =
+                    ((usage.today_spend_usd / usage.monthly_ceiling_usd) * 100.0).min(100.0) as u16;
+            }
+            self.usage_data = usage;
+        }
+        self.workflows = fetch_spine_workflows(&root);
+        self.context = fetch_brain_context(&root);
+        self.push_log(
+            "Manual refresh requested — synced organ telemetry, brain facts, and heart budget"
+                .into(),
+        );
     }
 
     fn push_log(&mut self, log: String) {
@@ -271,7 +319,7 @@ impl AppState {
                     .usage_data
                     .model_breakdowns
                     .iter_mut()
-                    .find(|r| r.model == model)
+                    .find(|r| r.model == model && r.provider == provider)
                 {
                     row.calls += 1;
                     row.prompt_tokens += prompt;
@@ -290,6 +338,12 @@ impl AppState {
                         billing_type: billing.to_string(),
                     });
                 }
+                if self.usage_data.monthly_ceiling_usd > 0.0 {
+                    self.token_budget_used = ((self.usage_data.today_spend_usd
+                        / self.usage_data.monthly_ceiling_usd)
+                        * 100.0)
+                        .min(100.0) as u16;
+                }
             }
             self.push_log(format!("[USAGE] Recorded turn usage on {subject}"));
         } else if subject == "events.heart.quota" {
@@ -303,38 +357,44 @@ impl AppState {
             self.push_log(format!(
                 "[ALERT] Budget alert threshold exceeded: {payload}"
             ));
-        } else if subject.starts_with("events.heart") {
-            if let Some(cpu_str) = payload
-                .split("CPU: ")
-                .nth(1)
-                .and_then(|s| s.split('%').next())
-                && let Ok(c) = cpu_str.trim().parse::<u16>()
-            {
-                self.cpu = c.min(100);
+        } else if subject.starts_with("events.spine") || subject.starts_with("autonomic.spine") {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) {
+                let wf_name = v
+                    .get("workflow_name")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("spine");
+                let ev_type = v
+                    .get("event_type")
+                    .and_then(|e| e.as_str())
+                    .unwrap_or("state");
+                let node = v
+                    .get("payload")
+                    .and_then(|p| p.get("node_name"))
+                    .and_then(|n| n.as_str());
+                let desc = if let Some(n) = node {
+                    format!("▶ @{wf_name} [{ev_type}: {n}]")
+                } else {
+                    format!("▶ @{wf_name} [{ev_type}]")
+                };
+                self.workflows.insert(0, desc);
+            } else {
+                self.workflows.insert(0, format!("▶ {payload}"));
             }
-            if let Some(mem_str) = payload
-                .split("MEM: ")
-                .nth(1)
-                .and_then(|s| s.split("MB").next())
-                && let Ok(m) = mem_str.trim().parse::<u16>()
-            {
-                self.mem = m;
-            }
-            if let Some(budget_str) = payload
-                .split("BUDGET: ")
-                .nth(1)
-                .and_then(|s| s.split('%').next())
-                && let Ok(b) = budget_str.trim().parse::<u16>()
-            {
-                self.token_budget_used = b.min(100);
-            }
-        } else if subject.starts_with("events.spine") {
-            self.workflows.insert(0, format!("▶ {}", payload));
             self.workflows.truncate(30);
-        } else if subject.starts_with("events.brain") {
-            self.context.insert(0, format!("■ {}", payload));
+            self.push_log(format!("[SPINE] {subject}"));
+        } else if subject.starts_with("events.brain") || subject.starts_with("autonomic.brain") {
+            let single_line = payload.replace('\n', " ");
+            let trimmed = single_line.trim();
+            let shortened = if trimmed.chars().count() > 97 {
+                let truncated: String = trimmed.chars().take(94).collect();
+                format!("■ {truncated}...")
+            } else {
+                format!("■ {trimmed}")
+            };
+            self.context.insert(0, shortened);
             self.context.truncate(20);
-        } else if subject.starts_with("events.muscle") {
+            self.push_log(format!("[BRAIN] {subject}"));
+        } else if subject.starts_with("events.muscle") || subject.starts_with("autonomic.compute") {
             self.push_log(format!("[MUSCLE] {payload}"));
         } else {
             self.push_log(format!("{subject} -> {payload}"));
@@ -350,9 +410,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let nats_url =
-        std::env::var("AUTONOMIC_NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
-    let mut app = AppState::new(nats_url.clone());
+    let nats_cfg = nats_config::resolve_nats_config();
+    let mut app = AppState::new(nats_cfg.display_url.clone());
     let (tx, mut rx) = mpsc::channel(100);
 
     // Input Reader Thread
@@ -374,23 +433,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // NATS Event Listener
     let tx_nats = tx.clone();
+    let nats_target = nats_cfg.display_url.clone();
+    let auth_desc = nats_cfg.auth_source.description();
     tokio::spawn(async move {
-        match async_nats::connect(&nats_url).await {
+        match nats_cfg.connect().await {
             Ok(client) => {
                 let _ = tx_nats
                     .send(AppEvent::NatsMsg {
                         subject: "system.info".into(),
-                        payload: format!("Connected to NATS bus at {nats_url}"),
+                        payload: format!("Connected to NATS bus at {nats_target} ({auth_desc})"),
                     })
                     .await;
 
-                if let Ok(mut sub) = client.subscribe("events.>").await {
-                    while let Some(msg) = sub.next().await {
-                        let payload = String::from_utf8_lossy(&msg.payload).to_string();
-                        let subject = msg.subject.to_string();
-                        let _ = tx_nats.send(AppEvent::NatsMsg { subject, payload }).await;
+                let client_events = client.clone();
+                let tx_events = tx_nats.clone();
+                tokio::spawn(async move {
+                    if let Ok(mut sub) = client_events.subscribe("events.>").await {
+                        while let Some(msg) = sub.next().await {
+                            let payload = String::from_utf8_lossy(&msg.payload).to_string();
+                            let subject = msg.subject.to_string();
+                            let _ = tx_events.send(AppEvent::NatsMsg { subject, payload }).await;
+                        }
                     }
-                }
+                });
+
+                let tx_autonomic = tx_nats.clone();
+                tokio::spawn(async move {
+                    if let Ok(mut sub) = client.subscribe("autonomic.>").await {
+                        while let Some(msg) = sub.next().await {
+                            let payload = String::from_utf8_lossy(&msg.payload).to_string();
+                            let subject = msg.subject.to_string();
+                            let _ = tx_autonomic
+                                .send(AppEvent::NatsMsg { subject, payload })
+                                .await;
+                        }
+                    }
+                });
             }
             Err(e) => {
                 let _ = tx_nats
@@ -404,6 +482,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+
+    let mut tick_counter: u64 = 0;
 
     // Main App Event Loop
     while app.running {
@@ -422,11 +502,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     KeyCode::Tab | KeyCode::Right => app.active_tab = app.active_tab.next(),
                     KeyCode::BackTab | KeyCode::Left => app.active_tab = app.active_tab.prev(),
                     KeyCode::Char('r') => {
-                        app.push_log("Manual refresh requested — synced organ telemetry".into());
+                        app.refresh_all_telemetry();
                     }
                     _ => {}
                 },
-                AppEvent::Tick => {}
+                AppEvent::Tick => {
+                    tick_counter = tick_counter.wrapping_add(1);
+                    if tick_counter.is_multiple_of(20) {
+                        app.refresh_system_metrics();
+                        app.refresh_organ_mesh();
+                    }
+                }
                 AppEvent::NatsMsg { subject, payload } => {
                     if subject == "system.info" {
                         app.nats_connected = true;
@@ -503,13 +589,22 @@ fn render_header(f: &mut ratatui::Frame, area: Rect, app: &AppState) {
     } else {
         (format!("NATS STANDALONE [{}]", app.nats_url), CYBER_YELLOW)
     };
+    let online = app
+        .organs
+        .iter()
+        .filter(|o| o.status == "OPERATIONAL")
+        .count();
+    let total = app.organs.len();
+    let mesh_color = if online == total {
+        CYBER_GREEN
+    } else {
+        CYBER_YELLOW
+    };
     let center = Paragraph::new(Line::from(vec![
         Span::styled("MESH: ", Style::default().fg(TEXT_MUTED)),
         Span::styled(
-            "11/11 OPERATIONAL ",
-            Style::default()
-                .fg(CYBER_GREEN)
-                .add_modifier(Modifier::BOLD),
+            format!("{online}/{total} OPERATIONAL "),
+            Style::default().fg(mesh_color).add_modifier(Modifier::BOLD),
         ),
         Span::styled("• ", Style::default().fg(TEXT_MUTED)),
         Span::styled(nats_status, Style::default().fg(nats_color)),
@@ -594,7 +689,8 @@ fn render_overview_tab(f: &mut ratatui::Frame, area: Rect, app: &AppState) {
         .label(format!("{}%", app.cpu));
     f.render_widget(cpu_gauge, left[0]);
 
-    let mem_percent = ((app.mem as f32 / 16000.0) * 100.0).min(100.0) as u16;
+    let total_mem_mb = (app.total_mem_gb as f32 * 1024.0).max(1.0);
+    let mem_percent = ((app.mem as f32 / total_mem_mb) * 100.0).min(100.0) as u16;
     let mem_gauge = Gauge::default()
         .block(
             Block::default()
@@ -605,7 +701,7 @@ fn render_overview_tab(f: &mut ratatui::Frame, area: Rect, app: &AppState) {
         )
         .gauge_style(Style::default().fg(CYBER_PURPLE).bg(Color::Rgb(30, 35, 45)))
         .percent(mem_percent)
-        .label(format!("{} MB / 16 GB", app.mem));
+        .label(format!("{} MB / {} GB", app.mem, app.total_mem_gb));
     f.render_widget(mem_gauge, left[1]);
 
     let budget_color = if app.token_budget_used > 85 {
@@ -613,6 +709,10 @@ fn render_overview_tab(f: &mut ratatui::Frame, area: Rect, app: &AppState) {
     } else {
         CYBER_GREEN
     };
+    let budget_label = format!(
+        "{}% Budget Consumed (${:.2} / ${:.2})",
+        app.token_budget_used, app.usage_data.today_spend_usd, app.usage_data.monthly_ceiling_usd
+    );
     let budget_gauge = Gauge::default()
         .block(
             Block::default()
@@ -623,30 +723,49 @@ fn render_overview_tab(f: &mut ratatui::Frame, area: Rect, app: &AppState) {
         )
         .gauge_style(Style::default().fg(budget_color).bg(Color::Rgb(30, 35, 45)))
         .percent(app.token_budget_used)
-        .label(format!("{}% Budget Consumed", app.token_budget_used));
+        .label(budget_label);
     f.render_widget(budget_gauge, left[2]);
 
     // Mesh Quick Status
+    let online = app
+        .organs
+        .iter()
+        .filter(|o| o.status == "OPERATIONAL")
+        .count();
+    let total_organs = app.organs.len();
+    let faults = total_organs.saturating_sub(online);
+    let (online_color, fault_text, fault_color) = if faults == 0 {
+        (CYBER_GREEN, "0 faults (Nominal)".to_string(), CYBER_BLUE)
+    } else {
+        (
+            CYBER_YELLOW,
+            format!("{faults} offline (Standby)"),
+            CYBER_YELLOW,
+        )
+    };
+    let stream_text = if app.nats_connected {
+        "autonomic.> & events.> (live)"
+    } else {
+        "local telemetry cache"
+    };
+
     let mesh_summary = Paragraph::new(vec![
         Line::from(vec![
             Span::styled("Active Organs: ", Style::default().fg(TEXT_MUTED)),
             Span::styled(
-                "11 / 11 Online",
+                format!("{online} / {total_organs} Online"),
                 Style::default()
-                    .fg(CYBER_GREEN)
+                    .fg(online_color)
                     .add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
             Span::styled("Fault Tolerance: ", Style::default().fg(TEXT_MUTED)),
-            Span::styled("0 faults (Nominal)", Style::default().fg(CYBER_BLUE)),
+            Span::styled(fault_text, Style::default().fg(fault_color)),
         ]),
         Line::from(vec![
             Span::styled("Nerves Stream: ", Style::default().fg(TEXT_MUTED)),
-            Span::styled(
-                "events.> (JetStream live)",
-                Style::default().fg(Color::White),
-            ),
+            Span::styled(stream_text, Style::default().fg(Color::White)),
         ]),
         Line::from(vec![
             Span::styled("Signing: ", Style::default().fg(TEXT_MUTED)),
@@ -763,17 +882,34 @@ fn render_workflows_tab(f: &mut ratatui::Frame, area: Rect, app: &AppState) {
     f.render_widget(table, chunks[1]);
 }
 
-fn render_mesh_tab(f: &mut ratatui::Frame, area: Rect, _app: &AppState) {
-    let rows = DEFAULT_ORGANS.iter().map(|o| {
+fn render_mesh_tab(f: &mut ratatui::Frame, area: Rect, app: &AppState) {
+    let online = app
+        .organs
+        .iter()
+        .filter(|o| o.status == "OPERATIONAL")
+        .count();
+    let total = app.organs.len();
+    let border_color = if online == total {
+        CYBER_GREEN
+    } else {
+        CYBER_YELLOW
+    };
+
+    let rows = app.organs.iter().map(|o| {
+        let (status_color, status_text) = match o.status {
+            "OPERATIONAL" => (CYBER_GREEN, "OPERATIONAL"),
+            "STANDBY" => (TEXT_MUTED, "STANDBY"),
+            _ => (CYBER_RED, "OFFLINE"),
+        };
         let status_style = Style::default()
-            .fg(CYBER_GREEN)
+            .fg(status_color)
             .add_modifier(Modifier::BOLD);
         Row::new(vec![
             Cell::from(o.name).style(Style::default().fg(CYBER_BLUE).add_modifier(Modifier::BOLD)),
             Cell::from(o.role).style(Style::default().fg(Color::White)),
             Cell::from(o.category).style(Style::default().fg(CYBER_PURPLE)),
             Cell::from(o.port).style(Style::default().fg(CYBER_YELLOW)),
-            Cell::from(o.status).style(status_style),
+            Cell::from(status_text).style(status_style),
         ])
     });
 
@@ -799,10 +935,12 @@ fn render_mesh_tab(f: &mut ratatui::Frame, area: Rect, _app: &AppState) {
     )
     .block(
         Block::default()
-            .title(" Active Organ Mesh Matrix (11 / 11 Online) ")
+            .title(format!(
+                " Active Organ Mesh Matrix ({online} / {total} Online) "
+            ))
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(CYBER_GREEN)),
+            .border_style(Style::default().fg(border_color)),
     );
     f.render_widget(table, area);
 }
@@ -986,10 +1124,12 @@ mod tests {
         // Assert
         assert_eq!(state.usage_data.today_calls, initial_calls + 1);
         assert!((state.usage_data.today_spend_usd - (initial_spend + 0.0615)).abs() < 1e-4);
-        assert_eq!(state.usage_data.model_breakdowns.len(), 1);
-        assert_eq!(
-            state.usage_data.model_breakdowns[0].model,
-            "claude-3-7-sonnet"
+        assert!(
+            state
+                .usage_data
+                .model_breakdowns
+                .iter()
+                .any(|m| m.model == "claude-3-7-sonnet")
         );
         assert_eq!(state.event_count, 1);
     }
@@ -1014,5 +1154,20 @@ mod tests {
 
         // Assert
         assert_eq!(state.usage_data.sub_claude_quota_pct, 58);
+    }
+
+    #[test]
+    fn test_derived_app_state_metrics() {
+        let state = AppState::new("nats://127.0.0.1:4222".into());
+        assert!(state.total_mem_gb >= 1);
+        assert_eq!(state.organs.len(), 11);
+        assert!(
+            state
+                .organs
+                .iter()
+                .any(|o| o.name == "agent-tui" && o.status == "OPERATIONAL")
+        );
+        assert!(!state.workflows.is_empty());
+        assert!(!state.context.is_empty());
     }
 }
