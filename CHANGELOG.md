@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-beta.3.3] - 2026-10-18
+
+### Added
+- **NATS Credential Auto-Discovery & Telemetry Cache Fallback**: Seamlessly discover NATS credentials and fall back to local SQLite telemetry cache when remote NATS JetStream is offline.
+- **TerminalGuard RAII**: Guaranteed clean alternate screen restoration and cursor restoration on panic, termination signals, or normal exits.
+
+### Fixed
+- **CLI Flag Terminal Hang**: Handled CLI flags (`--help`, `--version`) cleanly without initializing raw terminal modes or locking stdin.
+- **SQLite Concurrency & Busy Timeouts**: Added 5-second busy timeout to prevent database locked errors during concurrent HUD queries.
+- **CI Workflow Hardening**: Excluded markdown and documentation from CI workflow triggers with universal runtime path filtering.
+
+### Changed
+- Bumped version to `v1.0.0-beta.3.3`.
+
 ## [1.0.0-beta.3.2] - 2026-10-18
 
 ### Fixed
