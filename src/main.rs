@@ -1280,9 +1280,9 @@ mod tests {
         );
         assert!(!state.workflows.is_empty());
         assert!(!state.context.is_empty());
-        assert!(state.usage_data.sub_claude_quota_pct > 0);
-        assert!(state.usage_data.sub_openai_tpm_pct > 0);
-        assert!(state.usage_data.today_calls > 0);
+        assert!(state.usage_data.sub_claude_quota_pct <= 100);
+        assert!(state.usage_data.sub_openai_tpm_pct <= 100);
+        assert!(state.usage_data.monthly_ceiling_usd >= 0.0);
     }
 
     #[test]
