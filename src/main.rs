@@ -896,7 +896,7 @@ fn render_workflows_tab(f: &mut ratatui::Frame, area: Rect, app: &AppState) {
         Line::from("Supported commands: agent-spine run --meta <task> | agent-spine init --with @workflow"),
         Line::from(vec![
             Span::styled("Curated Packs: ", Style::default().fg(TEXT_MUTED)),
-            Span::styled("@bugfix  @feature-from-spec  @release-notes  @stacked-pr  @mcp-health-check", Style::default().fg(CYBER_BLUE)),
+            Span::styled("@engineering-safety  @bugfix  @feature-from-spec  @release-notes  @stacked-pr", Style::default().fg(CYBER_BLUE)),
         ]),
     ])
     .block(Block::default().title(" Spine DAG Engine ").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(CYBER_GREEN)));
