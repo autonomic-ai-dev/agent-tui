@@ -1,3 +1,4 @@
+use chrono::{Datelike, NaiveDate};
 use std::fs;
 use std::net::{SocketAddr, TcpStream};
 use std::path::Path;
@@ -305,6 +306,41 @@ pub fn record_quota_event_to_heart_db(
     Ok(())
 }
 
+fn utc_midnight_ms(date: NaiveDate) -> i64 {
+    date.and_hms_opt(0, 0, 0)
+        .map(|dt| dt.and_utc().timestamp_millis())
+        .unwrap_or(0)
+}
+
+fn days_in_month(date: NaiveDate) -> u32 {
+    let first = date.with_day(1).unwrap_or(date);
+    let next_first = if date.month() == 12 {
+        NaiveDate::from_ymd_opt(date.year() + 1, 1, 1)
+    } else {
+        NaiveDate::from_ymd_opt(date.year(), date.month() + 1, 1)
+    };
+    next_first
+        .map(|next| (next - first).num_days() as u32)
+        .unwrap_or(30)
+}
+
+fn monthly_forecast(month_spend: f64, day_of_month: u32, days_in_month: u32) -> (f64, f64) {
+    let burn_rate = month_spend / f64::from(day_of_month.max(1));
+    let days_remaining = f64::from(days_in_month.saturating_sub(day_of_month));
+    (burn_rate, month_spend + burn_rate * days_remaining)
+}
+
+fn spend_since(conn: &rusqlite::Connection, start_ms: i64) -> (f64, u64) {
+    conn.query_row(
+        "SELECT COALESCE(SUM(estimated_cost_usd), 0.0), COUNT(*)
+         FROM model_usage_events
+         WHERE timestamp >= ?1",
+        [start_ms],
+        |row| Ok((row.get::<_, f64>(0)?, row.get::<_, u64>(1)?)),
+    )
+    .unwrap_or((0.0, 0))
+}
+
 pub fn fetch_heart_telemetry(autonomic_root: &Path) -> Option<UsageViewData> {
     let db_path = autonomic_root.join("state").join("heart").join("heart.db");
     if !db_path.exists() {
@@ -325,38 +361,11 @@ pub fn fetch_heart_telemetry(autonomic_root: &Path) -> Option<UsageViewData> {
         monthly_ceiling = val;
     }
 
-    // Today's total spend and calls
-    let start_of_today_ms = chrono::Utc::now()
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .map(|dt| dt.and_utc().timestamp_millis())
-        .unwrap_or(0);
-
-    let mut today_spend = 0.0;
-    let mut today_calls = 0u64;
-
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT COALESCE(SUM(estimated_cost_usd), 0.0), COUNT(*)
-         FROM model_usage_events
-         WHERE timestamp >= ?",
-    ) && let Ok((spend, calls)) = stmt.query_row([start_of_today_ms], |row| {
-        Ok((row.get::<_, f64>(0)?, row.get::<_, u64>(1)?))
-    }) {
-        today_spend = spend;
-        today_calls = calls;
-    }
-
-    // If today has 0 calls, fall back to all events in model_usage_events so historical/captured data is visible
-    if today_calls == 0
-        && let Ok(mut stmt) = conn.prepare(
-            "SELECT COALESCE(SUM(estimated_cost_usd), 0.0), COUNT(*) FROM model_usage_events",
-        )
-        && let Ok((spend, calls)) =
-            stmt.query_row([], |row| Ok((row.get::<_, f64>(0)?, row.get::<_, u64>(1)?)))
-    {
-        today_spend = spend;
-        today_calls = calls;
-    }
+    let now = chrono::Utc::now().date_naive();
+    let (today_spend, today_calls) = spend_since(&conn, utc_midnight_ms(now));
+    let (month_spend, _) = spend_since(&conn, utc_midnight_ms(now.with_day(1).unwrap_or(now)));
+    let days_in_month = days_in_month(now);
+    let (burn_rate, projected_month_end) = monthly_forecast(month_spend, now.day(), days_in_month);
 
     // Model breakdown
     let mut breakdowns = Vec::new();
@@ -458,8 +467,10 @@ pub fn fetch_heart_telemetry(autonomic_root: &Path) -> Option<UsageViewData> {
     Some(UsageViewData {
         today_spend_usd: today_spend,
         today_calls,
+        month_spend_usd: month_spend,
         monthly_ceiling_usd: monthly_ceiling,
-        burn_rate_usd: today_spend, // daily burn rate
+        burn_rate_usd: burn_rate,
+        projected_month_end_usd: projected_month_end,
         sub_claude_quota_pct,
         sub_claude_reset_str,
         sub_openai_tpm_pct,
@@ -667,6 +678,95 @@ mod tests {
         assert_eq!(telemetry.model_breakdowns[0].model, "claude-3-7-sonnet");
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    fn seed_heart_usage_db(name: &str, rows: &[(i64, f64)]) -> std::path::PathBuf {
+        let temp_dir = std::env::temp_dir().join(format!("test_tui_{name}_{}", uuid_test_str()));
+        let db_dir = temp_dir.join("state").join("heart");
+        let _ = fs::create_dir_all(&db_dir);
+        let conn = rusqlite::Connection::open(db_dir.join("heart.db")).expect("open test db");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE budget_policies (monthly_ceiling_usd REAL);
+            INSERT INTO budget_policies VALUES (150.0);
+            CREATE TABLE model_usage_events (
+                timestamp INTEGER,
+                provider TEXT,
+                model TEXT,
+                prompt_tokens INTEGER,
+                completion_tokens INTEGER,
+                cache_read_tokens INTEGER,
+                estimated_cost_usd REAL,
+                billing_type TEXT
+            );
+            "#,
+        )
+        .expect("create tables");
+        for (timestamp, cost) in rows {
+            conn.execute(
+                "INSERT INTO model_usage_events VALUES (?, 'anthropic', 'claude-3-7-sonnet', 100, 50, 0, ?, 'metered_api')",
+                rusqlite::params![timestamp, cost],
+            )
+            .expect("insert event");
+        }
+        temp_dir
+    }
+
+    #[test]
+    fn test_fetch_heart_telemetry_today_excludes_older_events() {
+        let stale_ms = 1_579_046_400_000;
+        let temp_dir = seed_heart_usage_db("stale_only", &[(stale_ms, 1.0)]);
+
+        let telemetry = fetch_heart_telemetry(&temp_dir).expect("fetch telemetry");
+        assert_eq!(telemetry.today_calls, 0);
+        assert_eq!(telemetry.today_spend_usd, 0.0);
+        assert_eq!(telemetry.month_spend_usd, 0.0);
+        assert_eq!(telemetry.projected_month_end_usd, 0.0);
+        assert_eq!(telemetry.model_breakdowns.len(), 1);
+        assert!((telemetry.model_breakdowns[0].estimated_cost_usd - 1.0).abs() < 1e-9);
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_fetch_heart_telemetry_splits_today_month_and_all_time() {
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let stale_ms = 1_579_046_400_000;
+        let temp_dir = seed_heart_usage_db("today_month", &[(now_ms, 0.5), (stale_ms, 1.0)]);
+
+        let telemetry = fetch_heart_telemetry(&temp_dir).expect("fetch telemetry");
+        assert_eq!(telemetry.today_calls, 1);
+        assert!((telemetry.today_spend_usd - 0.5).abs() < 1e-9);
+        assert!((telemetry.month_spend_usd - 0.5).abs() < 1e-9);
+        assert!(telemetry.burn_rate_usd > 0.0);
+        assert!(telemetry.projected_month_end_usd >= telemetry.month_spend_usd);
+        let all_time: f64 = telemetry
+            .model_breakdowns
+            .iter()
+            .map(|r| r.estimated_cost_usd)
+            .sum();
+        assert!((all_time - 1.5).abs() < 1e-9);
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_monthly_forecast_projects_remaining_days_at_average_burn() {
+        let (burn_rate, projected) = monthly_forecast(10.0, 5, 30);
+        assert!((burn_rate - 2.0).abs() < 1e-9);
+        assert!((projected - 60.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_days_in_month_handles_leap_year_and_december() {
+        assert_eq!(
+            days_in_month(NaiveDate::from_ymd_opt(2024, 2, 10).unwrap()),
+            29
+        );
+        assert_eq!(
+            days_in_month(NaiveDate::from_ymd_opt(2026, 12, 18).unwrap()),
+            31
+        );
     }
 
     #[test]

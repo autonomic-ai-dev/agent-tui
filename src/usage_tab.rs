@@ -28,8 +28,10 @@ pub struct ModelUsageRow {
 pub struct UsageViewData {
     pub today_spend_usd: f64,
     pub today_calls: u64,
+    pub month_spend_usd: f64,
     pub monthly_ceiling_usd: f64,
     pub burn_rate_usd: f64,
+    pub projected_month_end_usd: f64,
     pub sub_claude_quota_pct: u16,
     pub sub_claude_reset_str: String,
     pub sub_openai_tpm_pct: u16,
@@ -38,13 +40,25 @@ pub struct UsageViewData {
     pub cache_dollars_saved: f64,
 }
 
+impl UsageViewData {
+    pub fn budget_used_pct(&self) -> u16 {
+        if self.monthly_ceiling_usd > 0.0 {
+            ((self.month_spend_usd / self.monthly_ceiling_usd) * 100.0).min(100.0) as u16
+        } else {
+            0
+        }
+    }
+}
+
 impl Default for UsageViewData {
     fn default() -> Self {
         Self {
             today_spend_usd: 0.0,
             today_calls: 0,
+            month_spend_usd: 0.0,
             monthly_ceiling_usd: 100.0,
             burn_rate_usd: 0.0,
+            projected_month_end_usd: 0.0,
             sub_claude_quota_pct: 0,
             sub_claude_reset_str: "Standby".to_string(),
             sub_openai_tpm_pct: 0,
@@ -115,8 +129,8 @@ fn render_top_cards(f: &mut ratatui::Frame, area: Rect, data: &UsageViewData) {
     f.render_widget(spend_card, cols[0]);
 
     // Card 2: Monthly Budget
-    let remaining = (data.monthly_ceiling_usd - data.today_spend_usd).max(0.0);
-    let budget_pct = ((data.today_spend_usd / data.monthly_ceiling_usd) * 100.0).min(100.0) as u16;
+    let remaining = (data.monthly_ceiling_usd - data.month_spend_usd).max(0.0);
+    let budget_pct = data.budget_used_pct();
     let budget_color = if budget_pct > 90 {
         CYBER_RED
     } else if budget_pct > 75 {
@@ -341,7 +355,7 @@ fn render_model_table(f: &mut ratatui::Frame, area: Rect, data: &UsageViewData) 
 }
 
 fn render_forecast_banner(f: &mut ratatui::Frame, area: Rect, data: &UsageViewData) {
-    let projected_spend = data.today_spend_usd + (data.burn_rate_usd * 25.0);
+    let projected_spend = data.projected_month_end_usd;
     let status_str = if projected_spend <= data.monthly_ceiling_usd {
         format!(
             "Projected Month-End: ${:.2} (WITHIN ${:.2} CEILING) │ Soft Alert Gate: 80% (${:.2})",
@@ -373,7 +387,7 @@ fn render_forecast_banner(f: &mut ratatui::Frame, area: Rect, data: &UsageViewDa
             ),
             Span::styled(
                 format!(
-                    " Token savings from brain cache deduplication: {:.1}% (estimated ~${:.2} saved this week)",
+                    " Token savings from brain cache deduplication: {:.1}% (estimated ~${:.2} saved across recorded turns)",
                     data.cache_savings_pct, data.cache_dollars_saved
                 ),
                 Style::default().fg(Color::White),
