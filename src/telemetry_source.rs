@@ -76,6 +76,7 @@ pub fn fetch_heart_telemetry(autonomic_root: &Path) -> Option<UsageViewData> {
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .ok()?;
+    let _ = conn.busy_timeout(Duration::from_millis(250));
 
     let mut monthly_ceiling = 100.0;
     if let Ok(mut stmt) = conn.prepare("SELECT monthly_ceiling_usd FROM budget_policies LIMIT 1")
@@ -195,19 +196,20 @@ pub fn fetch_spine_workflows(autonomic_root: &Path) -> Vec<String> {
                 rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
                     | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
             )
-            && let Ok(mut stmt) = conn.prepare(
+        {
+            let _ = conn.busy_timeout(Duration::from_millis(250));
+            if let Ok(mut stmt) = conn.prepare(
                 "SELECT DISTINCT execution_id, created_at FROM snapshots ORDER BY id DESC LIMIT 10",
-            )
-            && let Ok(rows) = stmt.query_map([], |row| {
+            ) && let Ok(rows) = stmt.query_map([], |row| {
                 Ok(format!(
                     "▶ @execution-{} [{}]",
                     &row.get::<_, String>(0)?[..8.min(row.get::<_, String>(0)?.len())],
                     row.get::<_, String>(1)?
                 ))
-            })
-        {
-            for item in rows.flatten() {
-                workflows.push(item);
+            }) {
+                for item in rows.flatten() {
+                    workflows.push(item);
+                }
             }
         }
     }
@@ -231,6 +233,7 @@ pub fn fetch_brain_context(autonomic_root: &Path) -> Vec<String> {
     ) else {
         return vec!["■ Connecting to brain.db...".into()];
     };
+    let _ = conn.busy_timeout(Duration::from_millis(250));
 
     let mut facts = Vec::new();
     if let Ok(mut stmt) = conn.prepare("SELECT fact FROM facts ORDER BY rowid DESC LIMIT 20")
