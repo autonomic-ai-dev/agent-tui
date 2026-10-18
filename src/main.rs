@@ -112,49 +112,49 @@ pub const DEFAULT_ORGANS: [OrganMeta; 11] = [
         role: "Organ Supervisor / Gateway",
         category: "Core",
         status: "OPERATIONAL",
-        port: "3200",
+        port: "3100",
     },
     OrganMeta {
         name: "agent-brain",
         role: "Routing, Memory & MCP Federation",
         category: "Core",
         status: "OPERATIONAL",
-        port: "7842",
+        port: "3201",
     },
     OrganMeta {
         name: "agent-spine",
         role: "Deterministic YAML Workflow DAGs",
         category: "Execution",
         status: "OPERATIONAL",
-        port: "7843",
+        port: "3000",
     },
     OrganMeta {
         name: "agent-muscle",
         role: "Sandboxed Execution & Training",
         category: "Execution",
         status: "OPERATIONAL",
-        port: "7844",
+        port: "3103",
     },
     OrganMeta {
         name: "agent-heart",
         role: "Token Budget & Cost Guardrails",
         category: "Core",
         status: "OPERATIONAL",
-        port: "7845",
+        port: "3101",
     },
     OrganMeta {
         name: "agent-mouth",
         role: "AST Policy & Slack Approvals",
         category: "Interface",
         status: "OPERATIONAL",
-        port: "7846",
+        port: "3104",
     },
     OrganMeta {
         name: "agent-immune",
         role: "Security Scan & Sandbox Verify",
         category: "Core",
         status: "OPERATIONAL",
-        port: "7847",
+        port: "3106",
     },
     OrganMeta {
         name: "agent-nerves",
@@ -168,7 +168,7 @@ pub const DEFAULT_ORGANS: [OrganMeta; 11] = [
         role: "DOM Index & Visual VLM Describe",
         category: "Sensory",
         status: "OPERATIONAL",
-        port: "7849",
+        port: "3105",
     },
     OrganMeta {
         name: "agent-tui",
@@ -302,6 +302,9 @@ impl AppState {
         if subject == "events.heart.usage" {
             self.usage_data.today_calls += 1;
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) {
+                let root = nats_config::autonomic_root();
+                let _ = telemetry_source::record_usage_event_to_heart_db(&root, &v);
+
                 if let Some(cost) = v.get("estimated_cost_usd").and_then(|c| c.as_f64()) {
                     self.usage_data.today_spend_usd += cost;
                 }
@@ -357,13 +360,65 @@ impl AppState {
                         * 100.0)
                         .min(100.0) as u16;
                 }
+
+                // Recalculate cache savings
+                let mut total_prompt = 0u64;
+                let mut total_cache = 0u64;
+                for row in &self.usage_data.model_breakdowns {
+                    total_prompt += row.prompt_tokens;
+                    total_cache += row.cache_read;
+                }
+                let total_in = total_prompt + total_cache;
+                if total_in > 0 {
+                    self.usage_data.cache_savings_pct =
+                        ((total_cache as f64) / (total_in as f64)) * 100.0;
+                    self.usage_data.cache_dollars_saved = (total_cache as f64 / 1_000_000.0) * 2.25;
+                }
             }
             self.push_log(format!("[USAGE] Recorded turn usage on {subject}"));
         } else if subject == "events.heart.quota" {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(payload)
-                && let Some(pct) = v.get("utilization_pct").and_then(|u| u.as_f64())
-            {
-                self.usage_data.sub_claude_quota_pct = (pct as u16).min(100);
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) {
+                let root = nats_config::autonomic_root();
+                let _ = telemetry_source::record_quota_event_to_heart_db(&root, &v);
+
+                let provider = v.get("provider").and_then(|p| p.as_str()).unwrap_or("");
+                let window_type = v.get("window_type").and_then(|w| w.as_str()).unwrap_or("");
+                let pct = v
+                    .get("utilization_pct")
+                    .and_then(|u| u.as_f64())
+                    .unwrap_or(0.0);
+                let p_lower = provider.to_ascii_lowercase();
+                let w_lower = window_type.to_ascii_lowercase();
+
+                if p_lower.contains("anthropic")
+                    || p_lower.contains("claude")
+                    || w_lower.contains("5h")
+                {
+                    self.usage_data.sub_claude_quota_pct = (pct as u16).min(100);
+                    if let Some(mut reset_ts) = v.get("reset_at").and_then(|r| r.as_i64()) {
+                        if reset_ts < 100_000_000_000 {
+                            reset_ts *= 1000;
+                        }
+                        let now_ms = chrono::Utc::now().timestamp_millis();
+                        if reset_ts > now_ms {
+                            let diff_secs = (reset_ts - now_ms) / 1000;
+                            let hours = diff_secs / 3600;
+                            let mins = (diff_secs % 3600) / 60;
+                            self.usage_data.sub_claude_reset_str = if hours > 0 {
+                                format!("{hours}h {mins}m")
+                            } else {
+                                format!("{mins}m")
+                            };
+                        } else {
+                            self.usage_data.sub_claude_reset_str = "Resetting...".to_string();
+                        }
+                    }
+                } else if p_lower.contains("openai")
+                    || w_lower.contains("tpm")
+                    || w_lower.contains("rpm")
+                {
+                    self.usage_data.sub_openai_tpm_pct = (pct as u16).min(100);
+                }
             }
             self.push_log("[QUOTA] Updated provider subscription window".into());
         } else if subject == "events.heart.budget.alert" {
@@ -1225,6 +1280,9 @@ mod tests {
         );
         assert!(!state.workflows.is_empty());
         assert!(!state.context.is_empty());
+        assert!(state.usage_data.sub_claude_quota_pct > 0);
+        assert!(state.usage_data.sub_openai_tpm_pct > 0);
+        assert!(state.usage_data.today_calls > 0);
     }
 
     #[test]

@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-beta.3.4] - 2026-10-18
+
+### Fixed
+- **Organ Mesh Multi-Layer Detection (All 11 Online)**:
+  - Replaced fictitious `784x` ports with standard ecosystem ports (`agent-body: 3100`, `agent-brain: 3201`, `agent-spine: 3000`, `agent-muscle: 3103`, `agent-heart: 3101`, `agent-mouth: 3104`, `agent-immune: 3106`, `agent-nerves: 4222`, `agent-eyes: 3105`, `agent-tui: LOCAL`, `agent-ci-dashboard: 5173`).
+  - Implemented multi-layer health detection probing supervisor daemons (`status.json`), active TCP listeners, Unix domain sockets (`serve.sock`), and installed CLI/MCP binaries on PATH, restoring all 11 organs to `OPERATIONAL`.
+
+### Added
+- **Real-Time Subscription Quotas & Reset Countdown**:
+  - Connected `provider_quotas` table from `heart.db` to display live Claude Pro 5h rolling window utilization % and reset timer, along with OpenAI Tier 4 TPM utilization %.
+- **Cache Deduplication & Savings Attribution**:
+  - Dynamically computes cache hit savings percentage and dollar savings from captured prompt and cache read tokens.
+- **Durable NATS Event Persistence**:
+  - Added `record_usage_event_to_heart_db` and `record_quota_event_to_heart_db` in `telemetry_source.rs`, persisting live incoming NATS events directly into SQLite `heart.db`.
+
+### Changed
+- Bumped version to `v1.0.0-beta.3.4`.
+
 ## [1.0.0-beta.3.3] - 2026-10-18
 
 ### Added

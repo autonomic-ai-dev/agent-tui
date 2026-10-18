@@ -1,6 +1,6 @@
 [package]
 name = "agent-tui"
-version = "1.0.0-beta.3.3"
+version = "1.0.0-beta.3.4"
 edition = "2024"
 
 [dependencies]
