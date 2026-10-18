@@ -276,6 +276,19 @@ impl AppState {
         );
     }
 
+    fn refresh_local_cache_telemetry(&mut self) {
+        let root = nats_config::autonomic_root();
+        if let Some(usage) = fetch_heart_telemetry(&root) {
+            if usage.monthly_ceiling_usd > 0.0 {
+                self.token_budget_used =
+                    ((usage.today_spend_usd / usage.monthly_ceiling_usd) * 100.0).min(100.0) as u16;
+            }
+            self.usage_data = usage;
+        }
+        self.workflows = fetch_spine_workflows(&root);
+        self.context = fetch_brain_context(&root);
+    }
+
     fn push_log(&mut self, log: String) {
         let ts = Local::now().format("%H:%M:%S");
         self.logs.push(format!("[{ts}] {log}"));
@@ -402,11 +415,51 @@ impl AppState {
     }
 }
 
+pub fn handle_cli_args(args: &[String]) -> Option<String> {
+    if args
+        .iter()
+        .any(|a| a == "--version" || a == "-v" || a == "-V")
+    {
+        Some(format!("agent-tui {}", env!("CARGO_PKG_VERSION")))
+    } else if args.iter().any(|a| a == "--help" || a == "-h") {
+        Some(format!(
+            "agent-tui {}\nAutonomous 11-Organ HUD & Telemetry Mission Control\n\nUSAGE:\n    agent-tui [OPTIONS]\n\nOPTIONS:\n    -h, --help       Print help information\n    -v, --version    Print version information",
+            env!("CARGO_PKG_VERSION")
+        ))
+    } else {
+        None
+    }
+}
+
+struct TerminalGuard;
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let mut stdout = io::stdout();
+        let _ = stdout.execute(LeaveAlternateScreen);
+        let _ = stdout.execute(crossterm::cursor::Show);
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(msg) = handle_cli_args(&args) {
+        println!("{msg}");
+        return Ok(());
+    }
+
+    if !crossterm::tty::IsTty::is_tty(&std::io::stdin()) {
+        eprintln!("Error: agent-tui requires an interactive terminal (TTY).");
+        std::process::exit(1);
+    }
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     stdout.execute(EnterAlternateScreen)?;
+    let _guard = TerminalGuard;
+
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -511,6 +564,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if tick_counter.is_multiple_of(20) {
                         app.refresh_system_metrics();
                         app.refresh_organ_mesh();
+                    }
+                    if !app.nats_connected && tick_counter.is_multiple_of(40) {
+                        app.refresh_local_cache_telemetry();
                     }
                 }
                 AppEvent::NatsMsg { subject, payload } => {
@@ -1169,5 +1225,18 @@ mod tests {
         );
         assert!(!state.workflows.is_empty());
         assert!(!state.context.is_empty());
+    }
+
+    #[test]
+    fn test_handle_cli_args() {
+        let version_arg = vec!["agent-tui".to_string(), "--version".to_string()];
+        let v_arg = vec!["agent-tui".to_string(), "-v".to_string()];
+        let help_arg = vec!["agent-tui".to_string(), "--help".to_string()];
+        let no_arg = vec!["agent-tui".to_string()];
+
+        assert!(handle_cli_args(&version_arg).unwrap().contains("agent-tui"));
+        assert!(handle_cli_args(&v_arg).unwrap().contains("agent-tui"));
+        assert!(handle_cli_args(&help_arg).unwrap().contains("USAGE"));
+        assert_eq!(handle_cli_args(&no_arg), None);
     }
 }
