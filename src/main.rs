@@ -25,7 +25,7 @@ use telemetry_source::{
     LiveOrganStatus, fetch_brain_context, fetch_heart_telemetry, fetch_spine_workflows,
     fetch_system_metrics, probe_organ_mesh,
 };
-use usage_tab::{ModelUsageRow, UsageViewData, render_usage_tab};
+use usage_tab::{UsageViewData, render_usage_tab};
 
 const CYBER_BLUE: Color = Color::Rgb(0, 229, 255);
 const CYBER_GREEN: Color = Color::Rgb(0, 255, 157);
@@ -209,6 +209,8 @@ struct AppState {
     nats_url: String,
     usage_data: UsageViewData,
     system_monitor: sysinfo::System,
+    autonomic_root: std::path::PathBuf,
+    recent_event_ids: Vec<String>,
 }
 
 impl AppState {
@@ -218,12 +220,7 @@ impl AppState {
         let sys_metrics = fetch_system_metrics(&mut sys);
         let organs = probe_organ_mesh(&DEFAULT_ORGANS);
         let usage_data = fetch_heart_telemetry(&root).unwrap_or_default();
-        let budget_pct = if usage_data.monthly_ceiling_usd > 0.0 {
-            ((usage_data.today_spend_usd / usage_data.monthly_ceiling_usd) * 100.0).min(100.0)
-                as u16
-        } else {
-            0
-        };
+        let budget_pct = usage_data.budget_used_pct();
         let workflows = fetch_spine_workflows(&root);
         let context = fetch_brain_context(&root);
 
@@ -243,6 +240,8 @@ impl AppState {
             nats_url,
             usage_data,
             system_monitor: sys,
+            autonomic_root: root,
+            recent_event_ids: vec![],
         }
     }
 
@@ -257,19 +256,19 @@ impl AppState {
         self.organs = probe_organ_mesh(&DEFAULT_ORGANS);
     }
 
-    fn refresh_all_telemetry(&mut self) {
-        let root = nats_config::autonomic_root();
-        self.refresh_system_metrics();
-        self.refresh_organ_mesh();
-        if let Some(usage) = fetch_heart_telemetry(&root) {
-            if usage.monthly_ceiling_usd > 0.0 {
-                self.token_budget_used =
-                    ((usage.today_spend_usd / usage.monthly_ceiling_usd) * 100.0).min(100.0) as u16;
-            }
+    fn reload_usage(&mut self) {
+        if let Some(usage) = fetch_heart_telemetry(&self.autonomic_root) {
+            self.token_budget_used = usage.budget_used_pct();
             self.usage_data = usage;
         }
-        self.workflows = fetch_spine_workflows(&root);
-        self.context = fetch_brain_context(&root);
+    }
+
+    fn refresh_all_telemetry(&mut self) {
+        self.refresh_system_metrics();
+        self.refresh_organ_mesh();
+        self.reload_usage();
+        self.workflows = fetch_spine_workflows(&self.autonomic_root);
+        self.context = fetch_brain_context(&self.autonomic_root);
         self.push_log(
             "Manual refresh requested — synced organ telemetry, brain facts, and heart budget"
                 .into(),
@@ -277,16 +276,9 @@ impl AppState {
     }
 
     fn refresh_local_cache_telemetry(&mut self) {
-        let root = nats_config::autonomic_root();
-        if let Some(usage) = fetch_heart_telemetry(&root) {
-            if usage.monthly_ceiling_usd > 0.0 {
-                self.token_budget_used =
-                    ((usage.today_spend_usd / usage.monthly_ceiling_usd) * 100.0).min(100.0) as u16;
-            }
-            self.usage_data = usage;
-        }
-        self.workflows = fetch_spine_workflows(&root);
-        self.context = fetch_brain_context(&root);
+        self.reload_usage();
+        self.workflows = fetch_spine_workflows(&self.autonomic_root);
+        self.context = fetch_brain_context(&self.autonomic_root);
     }
 
     fn push_log(&mut self, log: String) {
@@ -298,88 +290,29 @@ impl AppState {
     }
 
     fn update_from_nats(&mut self, subject: &str, payload: &str) {
-        self.event_count += 1;
         if subject == "events.heart.usage" {
-            self.usage_data.today_calls += 1;
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) {
-                let root = nats_config::autonomic_root();
-                let _ = telemetry_source::record_usage_event_to_heart_db(&root, &v);
-
-                if let Some(cost) = v.get("estimated_cost_usd").and_then(|c| c.as_f64()) {
-                    self.usage_data.today_spend_usd += cost;
+                if let Some(id) = v.get("id").and_then(|i| i.as_str()) {
+                    if self.recent_event_ids.iter().any(|existing| existing == id) {
+                        return;
+                    }
+                    self.recent_event_ids.push(id.to_string());
+                    if self.recent_event_ids.len() > 100 {
+                        self.recent_event_ids.remove(0);
+                    }
                 }
-                let model = v.get("model").and_then(|m| m.as_str()).unwrap_or("unknown");
-                let provider = v
-                    .get("provider")
-                    .and_then(|p| p.as_str())
-                    .unwrap_or("unknown");
-                let prompt = v.get("prompt_tokens").and_then(|p| p.as_u64()).unwrap_or(0);
-                let compl = v
-                    .get("completion_tokens")
-                    .and_then(|c| c.as_u64())
-                    .unwrap_or(0);
-                let cache = v
-                    .get("cache_read_tokens")
-                    .and_then(|c| c.as_u64())
-                    .unwrap_or(0);
-                let cost = v
-                    .get("estimated_cost_usd")
-                    .and_then(|c| c.as_f64())
-                    .unwrap_or(0.0);
-                let billing = v
-                    .get("billing_type")
-                    .and_then(|b| b.as_str())
-                    .unwrap_or("metered_api");
-
-                if let Some(row) = self
-                    .usage_data
-                    .model_breakdowns
-                    .iter_mut()
-                    .find(|r| r.model == model && r.provider == provider)
-                {
-                    row.calls += 1;
-                    row.prompt_tokens += prompt;
-                    row.completion_tokens += compl;
-                    row.cache_read += cache;
-                    row.estimated_cost_usd += cost;
-                } else {
-                    self.usage_data.model_breakdowns.push(ModelUsageRow {
-                        provider: provider.to_string(),
-                        model: model.to_string(),
-                        calls: 1,
-                        prompt_tokens: prompt,
-                        completion_tokens: compl,
-                        cache_read: cache,
-                        estimated_cost_usd: cost,
-                        billing_type: billing.to_string(),
-                    });
-                }
-                if self.usage_data.monthly_ceiling_usd > 0.0 {
-                    self.token_budget_used = ((self.usage_data.today_spend_usd
-                        / self.usage_data.monthly_ceiling_usd)
-                        * 100.0)
-                        .min(100.0) as u16;
-                }
-
-                // Recalculate cache savings
-                let mut total_prompt = 0u64;
-                let mut total_cache = 0u64;
-                for row in &self.usage_data.model_breakdowns {
-                    total_prompt += row.prompt_tokens;
-                    total_cache += row.cache_read;
-                }
-                let total_in = total_prompt + total_cache;
-                if total_in > 0 {
-                    self.usage_data.cache_savings_pct =
-                        ((total_cache as f64) / (total_in as f64)) * 100.0;
-                    self.usage_data.cache_dollars_saved = (total_cache as f64 / 1_000_000.0) * 2.25;
-                }
+                let _ = telemetry_source::record_usage_event_to_heart_db(&self.autonomic_root, &v);
             }
+            self.event_count += 1;
+            self.reload_usage();
             self.push_log(format!("[USAGE] Recorded turn usage on {subject}"));
-        } else if subject == "events.heart.quota" {
+            return;
+        }
+
+        self.event_count += 1;
+        if subject == "events.heart.quota" {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) {
-                let root = nats_config::autonomic_root();
-                let _ = telemetry_source::record_quota_event_to_heart_db(&root, &v);
+                let _ = telemetry_source::record_quota_event_to_heart_db(&self.autonomic_root, &v);
 
                 let provider = v.get("provider").and_then(|p| p.as_str()).unwrap_or("");
                 let window_type = v.get("window_type").and_then(|w| w.as_str()).unwrap_or("");
@@ -543,6 +476,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tx_nats = tx.clone();
     let nats_target = nats_cfg.display_url.clone();
     let auth_desc = nats_cfg.auth_source.description();
+    let primary_connect_url = nats_cfg.connect_url.clone();
     tokio::spawn(async move {
         match nats_cfg.connect().await {
             Ok(client) => {
@@ -590,6 +524,63 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+
+    if let Some((cloud_url, cloud_creds)) = nats_config::discover_cloud_telemetry_config()
+        && cloud_url != primary_connect_url
+    {
+        let tx_cloud = tx.clone();
+        tokio::spawn(async move {
+            let mut opts = if let Some(ref creds_path) = cloud_creds {
+                match async_nats::ConnectOptions::with_credentials_file(creds_path).await {
+                    Ok(o) => o,
+                    Err(e) => {
+                        let _ = tx_cloud
+                            .send(AppEvent::NatsMsg {
+                                subject: "system.warn".into(),
+                                payload: format!("Cloud telemetry credentials error ({e})"),
+                            })
+                            .await;
+                        return;
+                    }
+                }
+            } else {
+                async_nats::ConnectOptions::new()
+            };
+
+            if cloud_url.starts_with("tls://") {
+                opts = opts.require_tls(true);
+            }
+
+            match opts.connect(&cloud_url).await {
+                Ok(client) => {
+                    let _ = tx_cloud
+                        .send(AppEvent::NatsMsg {
+                            subject: "system.info".into(),
+                            payload: format!("Connected to cloud telemetry bus at {cloud_url}"),
+                        })
+                        .await;
+
+                    tokio::spawn(async move {
+                        if let Ok(mut sub) = client.subscribe("events.heart.>").await {
+                            while let Some(msg) = sub.next().await {
+                                let payload = String::from_utf8_lossy(&msg.payload).to_string();
+                                let subject = msg.subject.to_string();
+                                let _ = tx_cloud.send(AppEvent::NatsMsg { subject, payload }).await;
+                            }
+                        }
+                    });
+                }
+                Err(e) => {
+                    let _ = tx_cloud
+                        .send(AppEvent::NatsMsg {
+                            subject: "system.warn".into(),
+                            payload: format!("Cloud telemetry bus unavailable ({e})"),
+                        })
+                        .await;
+                }
+            }
+        });
+    }
 
     let mut tick_counter: u64 = 0;
 
@@ -1210,8 +1201,7 @@ mod tests {
     fn test_update_from_nats_usage_event() {
         // Arrange
         let mut state = AppState::new("nats://127.0.0.1:4222".into());
-        let initial_spend = state.usage_data.today_spend_usd;
-        let initial_calls = state.usage_data.today_calls;
+        state.autonomic_root = std::env::temp_dir().join("agent-tui-test-usage-event-no-heart-db");
 
         let usage_json = r#"{
             "id": "evt-test-1",
@@ -1233,22 +1223,20 @@ mod tests {
         state.update_from_nats("events.heart.usage", usage_json);
 
         // Assert
-        assert_eq!(state.usage_data.today_calls, initial_calls + 1);
-        assert!((state.usage_data.today_spend_usd - (initial_spend + 0.0615)).abs() < 1e-4);
+        assert_eq!(state.event_count, 1);
         assert!(
             state
-                .usage_data
-                .model_breakdowns
-                .iter()
-                .any(|m| m.model == "claude-3-7-sonnet")
+                .logs
+                .last()
+                .is_some_and(|l| l.contains("[USAGE] Recorded turn usage"))
         );
-        assert_eq!(state.event_count, 1);
     }
 
     #[test]
     fn test_update_from_nats_quota_event() {
         // Arrange
         let mut state = AppState::new("nats://127.0.0.1:4222".into());
+        state.autonomic_root = std::env::temp_dir().join("agent-tui-test-quota-event-no-heart-db");
 
         let quota_json = r#"{
             "provider": "anthropic",

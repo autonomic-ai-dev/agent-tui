@@ -24,6 +24,7 @@ pub enum AuthSource {
     ExplicitUrl,
     Environment,
     CredsFile(String),
+    NatsCredentials(PathBuf),
     None,
 }
 
@@ -34,6 +35,7 @@ impl AuthSource {
             Self::ExplicitUrl => "URL credentials",
             Self::Environment => "environment variables",
             Self::CredsFile(_) => "creds.json auto-discovery",
+            Self::NatsCredentials(_) => "NATS credentials file",
             Self::None => "unauthenticated",
         }
     }
@@ -50,6 +52,7 @@ pub struct ResolvedNatsConfig {
     pub ca_path: Option<PathBuf>,
     pub cert_path: Option<PathBuf>,
     pub key_path: Option<PathBuf>,
+    pub creds_file: Option<PathBuf>,
 }
 
 fn home_dir() -> PathBuf {
@@ -104,8 +107,9 @@ pub fn resolve_nats_config_with_lookup<F>(
 where
     F: Fn(&str) -> Option<String>,
 {
-    let raw_url =
-        lookup("AUTONOMIC_NATS_URL").unwrap_or_else(|| "nats://127.0.0.1:4222".to_string());
+    let raw_url = lookup("AUTONOMIC_NATS_URL")
+        .or_else(|| lookup("AUTONOMIC_USAGE_NATS_URL"))
+        .unwrap_or_else(|| "nats://127.0.0.1:4222".to_string());
 
     let insecure = lookup("AUTONOMIC_NATS_INSECURE")
         .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
@@ -125,35 +129,47 @@ where
             ca_path: None,
             cert_path: None,
             key_path: None,
+            creds_file: None,
         };
     }
 
     let mut user = None;
     let mut password = None;
     let mut auth_source = AuthSource::None;
+    let mut creds_file_path = None;
 
     if !insecure {
-        // Case 2: Environment variables AUTONOMIC_NATS_USER / AUTONOMIC_NATS_PASSWORD
-        let env_user = lookup("AUTONOMIC_NATS_USER").unwrap_or_default();
-        let env_pass = lookup("AUTONOMIC_NATS_PASSWORD").unwrap_or_default();
-        if !env_user.is_empty() {
-            user = Some(env_user);
-            password = Some(env_pass);
-            auth_source = AuthSource::Environment;
-        } else {
-            // Case 3: Auto-discover from ~/.autonomic/broker/creds.json
-            // Default organ is "nerves" because it has pub/sub permissions for events.>
-            let organ = lookup("AUTONOMIC_ORGAN").unwrap_or_else(|| "nerves".to_string());
-            if let Some((u, p)) = load_organ_credentials(creds_file, &organ) {
-                user = Some(u);
-                password = Some(p);
-                auth_source = AuthSource::CredsFile(organ);
+        let env_creds =
+            lookup("AUTONOMIC_NATS_CREDS").or_else(|| lookup("AUTONOMIC_USAGE_NATS_CREDS"));
+        if let Some(ref cf) = env_creds {
+            let p = PathBuf::from(cf);
+            if p.exists() {
+                auth_source = AuthSource::NatsCredentials(p.clone());
+                creds_file_path = Some(p);
+            }
+        }
+
+        if creds_file_path.is_none() {
+            let env_user = lookup("AUTONOMIC_NATS_USER").unwrap_or_default();
+            let env_pass = lookup("AUTONOMIC_NATS_PASSWORD").unwrap_or_default();
+            if !env_user.is_empty() {
+                user = Some(env_user);
+                password = Some(env_pass);
+                auth_source = AuthSource::Environment;
+            } else {
+                let organ = lookup("AUTONOMIC_ORGAN").unwrap_or_else(|| "nerves".to_string());
+                if let Some((u, p)) = load_organ_credentials(creds_file, &organ) {
+                    user = Some(u);
+                    password = Some(p);
+                    auth_source = AuthSource::CredsFile(organ);
+                }
             }
         }
     }
 
     // TLS resolution
-    let tls_forced = lookup("AUTONOMIC_NATS_TLS").as_deref() == Some("1");
+    let tls_forced =
+        lookup("AUTONOMIC_NATS_TLS").as_deref() == Some("1") || raw_url.starts_with("tls://");
     let mut tls_enabled = tls_forced;
     let mut ca_path = lookup("AUTONOMIC_NATS_CA").map(PathBuf::from);
     let mut cert_path = lookup("AUTONOMIC_NATS_CERT").map(PathBuf::from);
@@ -209,12 +225,72 @@ where
         ca_path,
         cert_path,
         key_path,
+        creds_file: creds_file_path,
+    }
+}
+
+#[must_use]
+pub fn discover_cloud_telemetry_config() -> Option<(String, Option<PathBuf>)> {
+    if let Ok(url) = std::env::var("AUTONOMIC_USAGE_NATS_URL") {
+        let creds = std::env::var("AUTONOMIC_USAGE_NATS_CREDS")
+            .ok()
+            .map(PathBuf::from);
+        return Some((url, creds));
+    }
+
+    let claude_json_path = home_dir().join(".claude.json");
+    if let Ok(content) = fs::read_to_string(&claude_json_path)
+        && let Ok(v) = serde_json::from_str::<serde_json::Value>(&content)
+        && let Some(url) = v
+            .pointer("/mcpServers/agent-brain/env/AUTONOMIC_USAGE_NATS_URL")
+            .and_then(|u| u.as_str())
+    {
+        let creds = v
+            .pointer("/mcpServers/agent-brain/env/AUTONOMIC_USAGE_NATS_CREDS")
+            .and_then(|c| c.as_str())
+            .map(PathBuf::from);
+        return Some((url.to_string(), creds));
+    }
+
+    None
+}
+
+#[derive(Debug)]
+pub enum NatsError {
+    Connect(async_nats::ConnectError),
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for NatsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Connect(e) => write!(f, "{e}"),
+            Self::Io(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for NatsError {}
+
+impl From<async_nats::ConnectError> for NatsError {
+    fn from(e: async_nats::ConnectError) -> Self {
+        Self::Connect(e)
+    }
+}
+
+impl From<std::io::Error> for NatsError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
     }
 }
 
 impl ResolvedNatsConfig {
-    pub async fn connect(&self) -> Result<async_nats::Client, async_nats::ConnectError> {
-        let mut opts = async_nats::ConnectOptions::new();
+    pub async fn connect(&self) -> Result<async_nats::Client, NatsError> {
+        let mut opts = if let Some(creds) = &self.creds_file {
+            async_nats::ConnectOptions::with_credentials_file(creds).await?
+        } else {
+            async_nats::ConnectOptions::new()
+        };
 
         if let (Some(u), Some(p)) = (&self.user, &self.password) {
             opts = opts.user_and_password(u.clone(), p.clone());
@@ -230,7 +306,7 @@ impl ResolvedNatsConfig {
             }
         }
 
-        opts.connect(&self.connect_url).await
+        opts.connect(&self.connect_url).await.map_err(Into::into)
     }
 }
 
@@ -260,6 +336,10 @@ mod tests {
         assert_eq!(
             AuthSource::CredsFile("nerves".into()).description(),
             "creds.json auto-discovery"
+        );
+        assert_eq!(
+            AuthSource::NatsCredentials(PathBuf::from("/path/to/creds")).description(),
+            "NATS credentials file"
         );
         assert_eq!(AuthSource::None.description(), "unauthenticated");
     }
@@ -398,6 +478,50 @@ mod tests {
             let sub = client.subscribe("events.>").await;
             assert!(sub.is_ok());
         }
+    }
+
+    #[test]
+    fn test_resolve_nats_creds_env() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("test_nats_creds_env_{}", uuid_test_str()));
+        let _ = fs::create_dir_all(&temp_dir);
+        let creds_file = temp_dir.join("test.creds");
+        fs::write(&creds_file, "dummy credentials").expect("write creds");
+
+        let dummy = PathBuf::from("/nonexistent");
+        let creds_str = creds_file.to_string_lossy().to_string();
+        let config = resolve_nats_config_with_lookup(
+            |key| match key {
+                "AUTONOMIC_USAGE_NATS_URL" => Some("tls://connect.ngs.global".to_string()),
+                "AUTONOMIC_USAGE_NATS_CREDS" => Some(creds_str.clone()),
+                _ => None,
+            },
+            &dummy,
+            &dummy,
+        );
+        assert_eq!(config.connect_url, "tls://connect.ngs.global");
+        assert!(config.tls_enabled);
+        assert_eq!(
+            config.auth_source,
+            AuthSource::NatsCredentials(creds_file.clone())
+        );
+        assert_eq!(config.creds_file, Some(creds_file));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_resolve_tls_scheme_enables_tls() {
+        let dummy = PathBuf::from("/nonexistent");
+        let config = resolve_nats_config_with_lookup(
+            |key| match key {
+                "AUTONOMIC_NATS_URL" => Some("tls://my-nats.example.com:4222".to_string()),
+                _ => None,
+            },
+            &dummy,
+            &dummy,
+        );
+        assert!(config.tls_enabled);
     }
 
     fn uuid_test_str() -> String {

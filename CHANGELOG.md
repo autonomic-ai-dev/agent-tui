@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-beta.3.5] - 2026-10-18
+
+### Added
+- **NATS Credentials File (`.creds`) Support**:
+  - Implemented `.creds` file authentication (Synadia NGS JWT/NKey user files) in `ResolvedNatsConfig::connect()` using `async_nats::ConnectOptions::with_credentials_file()`.
+  - Added support for `AUTONOMIC_NATS_CREDS` and `AUTONOMIC_USAGE_NATS_CREDS` in `nats_config::resolve_nats_config_with_lookup()`.
+  - Automatically enables TLS when connecting with `tls://` URL scheme.
+- **Secondary Cloud Telemetry Listener**:
+  - Auto-discovers cloud telemetry endpoints (`AUTONOMIC_USAGE_NATS_URL`, `AUTONOMIC_USAGE_NATS_CREDS`) from environment or `~/.claude.json`.
+  - Spawns a background cloud telemetry listener when a cloud broker is configured, subscribing to `events.heart.>` so all usage and quota events stream into Tab 5 (EVENT STREAM) and Tab 6 (USAGE & BUDGET).
+  - Event ID deduplication in `AppState` to prevent duplicate counts or logs when events arrive over multiple paths.
+- **Monthly Usage & Burn Rate Forecasting**:
+  - Replaced naive all-time spend calculation with accurate today spend vs. month-to-date spend.
+  - Added linear extrapolation forecasting for projected month-end budget burn against configured monthly ceilings.
+
+### Changed
+- Bumped version to `v1.0.0-beta.3.5`.
+
 ## [1.0.0-beta.3.4] - 2026-10-18
 
 ### Fixed
