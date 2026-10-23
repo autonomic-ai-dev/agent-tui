@@ -6,10 +6,16 @@ Agent context: [CONTEXT.md](CONTEXT.md) · Telemetry Guide: [https://autonomic-a
 
 ## Features
 
-- **Organ Health (Top)**: Real-time heartbeat tracking of CPU/Memory from `agent-heart`.
-- **DAG Workflows (Left)**: Visualization of the deterministic DAG nodes actively executing in `agent-spine`.
-- **Sandbox Logs (Right)**: Streaming standard output/error from `agent-muscle` code execution.
-- **Context Routing (Bottom)**: Insights into memory chunks and rules retrieved by `agent-brain`.
+The dashboard has six tabs, selected with keys `1` to `6`:
+
+- **1 Overview**: Top-level status across the organs.
+- **2 Workflows**: Workflow activity from `agent-spine` (`events.spine*`).
+- **3 Mesh**: Organ health and resource use.
+- **4 Brain**: Context and rules retrieved by `agent-brain` (`events.brain*`).
+- **5 Logs**: Log lines from the organs.
+- **6 Usage**: Token usage, quota, and budget alerts from `agent-heart` (`events.heart.*`).
+
+The dashboard subscribes to `events.>`, `autonomic.>`, and `events.heart.>` on the NATS bus.
 
 ## Installation
 
@@ -46,4 +52,6 @@ graph TD
 ```
 
 ## Shortcuts
+- `1`-`6`: Switch tabs.
+- `r`: Refresh.
 - `q` or `Esc`: Quit the TUI.
