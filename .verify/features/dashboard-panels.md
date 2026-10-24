@@ -30,6 +30,12 @@ Summary: agent-tui is a six-tab terminal dashboard. It subscribes to the NATS ev
   - Behaviour: Keys `1` to `6` select a tab. Key `r` triggers a refresh (handler at `main.rs` line 603). `q` or `Esc` sets `running = false`.
   - Outcome: The active tab changes. The process exits on quit.
 
+## Code
+
+- `src`
+- `Cargo.toml`
+- `scripts`
+
 ## How to get to it (user POV)
 
 - CLI: `autonomic tui`, or `agent-tui` built from source

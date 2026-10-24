@@ -7,3 +7,7 @@ commands = [
   ".verify/playbooks/verify_full_suite.sh",
   ".verify/playbooks/verify_usage_tab.sh",
 ]
+
+[verify.default]
+command = ["cargo", "test"]
+timeout_secs = 600
